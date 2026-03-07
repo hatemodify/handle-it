@@ -1,0 +1,32 @@
+{
+  "name": "handle-it",
+  "version": "1.0.0",
+  "description": "AI-powered autonomous development pipeline — 아이디어 한 줄 → 코드 + PR 자동 완성",
+  "type": "module",
+  "bin": {
+    "autodev": "./bin/autodev.js",
+    "autodev-teams": "./bin/autodev.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "prompts/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "prepare": "node -e \"const fs=require('fs'); ['scripts/autodev.sh','scripts/install.sh',...fs.readdirSync('scripts/lib').map(f=>'scripts/lib/'+f)].filter(f=>f.endsWith('.sh')).forEach(f=>{try{fs.chmodSync(f,'755')}catch(e){}});\""
+  },
+  "keywords": [
+    "ai", "claude", "autonomous", "development", "agents", "autodev"
+  ],
+  "author": "J",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-id/autodev-teams"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
