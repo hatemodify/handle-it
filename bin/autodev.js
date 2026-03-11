@@ -57,6 +57,7 @@ if (!command || command === '--help' || command === '-h') {
     handle-it "<아이디어>" [경로]       출력 경로 지정
     handle-it init                     현재 폴더에 handle-it.config.json 생성
     handle-it status [팀ID]            진행 중인 팀 상태 확인
+    handle-it resume [팀ID]            중단된 팀 복구 재실행
     handle-it --version                버전 확인
 
   \x1b[1m예시:\x1b[0m
@@ -156,25 +157,86 @@ if (command === 'status') {
   process.exit(0);
 }
 
+// ── 프로젝트 루트 config 읽기 (resume / 메인 실행 공통) ──
+let config = {};
+{
+  const configPath = resolve(process.cwd(), 'handle-it.config.json');
+  const legacyConfigPath = resolve(process.cwd(), 'autodev.config.json');
+  const activeConfigPath = existsSync(configPath) ? configPath : (existsSync(legacyConfigPath) ? legacyConfigPath : null);
+  if (activeConfigPath) {
+    try {
+      config = JSON.parse(readFileSync(activeConfigPath, 'utf-8'));
+      console.log(`\x1b[2m  ${activeConfigPath.split('/').pop()} 로드됨\x1b[0m`);
+    } catch (e) {
+      console.warn(`\x1b[33m⚠\x1b[0m  config 파싱 실패, 기본값 사용`);
+    }
+  }
+}
+
+// ─────────────────────────────────────
+//  handle-it resume [팀ID]
+// ─────────────────────────────────────
+if (command === 'resume') {
+  const teamsRoot = process.env.HANDLE_IT_TEAMS_ROOT
+    || process.env.AUTODEV_TEAMS_ROOT
+    || join(process.env.HOME, '.handle-it', 'teams');
+
+  if (!existsSync(teamsRoot)) {
+    console.log('복구할 팀 없음');
+    process.exit(1);
+  }
+
+  const { readdirSync, statSync } = await import('fs');
+  const teams = readdirSync(teamsRoot)
+    .filter(d => existsSync(join(teamsRoot, d, 'config.json')))
+    .sort((a, b) => {
+      const ta = statSync(join(teamsRoot, a)).mtimeMs;
+      const tb = statSync(join(teamsRoot, b)).mtimeMs;
+      return tb - ta;
+    });
+
+  const targetTeam = args[1] || teams[0];
+  if (!targetTeam || !existsSync(join(teamsRoot, targetTeam, 'config.json'))) {
+    console.error('복구할 팀을 찾을 수 없음');
+    process.exit(1);
+  }
+
+  console.log(`\x1b[33m→\x1b[0m  팀 복구: ${targetTeam}`);
+
+  const env = {
+    ...process.env,
+    AUTODEV_ROOT: SCRIPTS_DIR,
+    AUTODEV_PROMPTS: config.prompts_dir
+      ? resolve(process.cwd(), config.prompts_dir)
+      : PROMPTS_DIR,
+    AUTODEV_TEAMS_ROOT: teamsRoot,
+    AUTODEV_TIMEOUT: String(config.timeout || 7200),
+    AUTODEV_HEALTH_INTERVAL: String(config.health_interval || 5),
+    AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 300),
+    CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
+    HANDLE_IT_RESUME_TEAM: targetTeam,
+  };
+
+  const child = spawn('bash', [join(SCRIPTS_DIR, 'autodev.sh'), '__resume__'], {
+    env,
+    stdio: 'inherit',
+    cwd: process.cwd(),
+  });
+
+  await new Promise((_, reject) => {
+    child.on('error', err => {
+      console.error(`\x1b[31m✗\x1b[0m  실행 실패: ${err.message}`);
+      process.exit(1);
+    });
+    child.on('exit', code => process.exit(code ?? 0));
+  });
+}
+
 // ─────────────────────────────────────
 //  autodev "<아이디어>" [경로]  — 메인 실행
 // ─────────────────────────────────────
 const idea       = command;
 const projectArg = args[1] || '';
-
-// 프로젝트 루트 config 읽기
-let config = {};
-const configPath = resolve(process.cwd(), 'handle-it.config.json');
-const legacyConfigPath = resolve(process.cwd(), 'autodev.config.json');
-const activeConfigPath = existsSync(configPath) ? configPath : (existsSync(legacyConfigPath) ? legacyConfigPath : null);
-if (activeConfigPath) {
-  try {
-    config = JSON.parse(readFileSync(activeConfigPath, 'utf-8'));
-    console.log(`\x1b[2m  ${activeConfigPath.split('/').pop()} 로드됨\x1b[0m`);
-  } catch (e) {
-    console.warn(`\x1b[33m⚠\x1b[0m  config 파싱 실패, 기본값 사용`);
-  }
-}
 
 // 환경변수 구성
 const env = {

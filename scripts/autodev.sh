@@ -273,6 +273,59 @@ step_summary() {
 }
 
 # ════════════════════════════════════════
+#  RESUME 모드
+# ════════════════════════════════════════
+if [ "${1:-}" = "__resume__" ]; then
+  TEAM_NAME="${HANDLE_IT_RESUME_TEAM:?'HANDLE_IT_RESUME_TEAM 필요'}"
+  TEAM_DIR="$TEAMS_ROOT/$TEAM_NAME"
+  PROJECT_DIR="$(cat "$TEAM_DIR/project_dir" 2>/dev/null || echo '/tmp/autodev_project')"
+
+  export AUTODEV_LOG_FILE="$HOME/.handle-it/logs/resume_$(date +%Y%m%d_%H%M%S).log"
+  mkdir -p "$(dirname "$AUTODEV_LOG_FILE")"
+
+  source "$AUTODEV_ROOT/lib/logger.sh"
+  source "$AUTODEV_ROOT/lib/task_queue.sh"
+  source "$AUTODEV_ROOT/lib/messenger.sh"
+  source "$AUTODEV_ROOT/lib/team_manager.sh"
+
+  QUEUE="$TEAM_DIR/tasks/queue.json"
+
+  log_step "RESUME  팀 복구: $TEAM_NAME"
+
+  # 1. in_progress 태스크를 pending으로 리셋
+  STALE=$(jq -r '.tasks[] | select(.status == "in_progress") | .id' "$QUEUE")
+  for task_id in $STALE; do
+    tq_reset "$QUEUE" "$task_id" "세션 복구로 리셋"
+    log_info "리셋: $task_id"
+  done
+
+  # 2. config.json 상태 복원
+  jq '.status = "active" | (.agents[] | .status) = "stopped"' \
+    "$TEAM_DIR/config.json" > "$TEAM_DIR/config.json.tmp" \
+    && mv "$TEAM_DIR/config.json.tmp" "$TEAM_DIR/config.json"
+
+  # 3. 에이전트 재스폰
+  log_step "RESUME  에이전트 재스폰"
+  jq -r '.agents[] | "\(.name)|\(.role)|\(.allowed_tools // "Read,Write,Edit,Bash")"' \
+    "$TEAM_DIR/config.json" | while IFS='|' read -r name role tools; do
+    agent_respawn "$TEAM_NAME" "$name" 2>/dev/null || \
+      agent_spawn "$TEAM_NAME" "$name" "$role" "$tools"
+  done
+
+  # 4. 리드 루프 재진입
+  log_step "RESUME  리드 에이전트 재시작"
+  timeout="${AUTODEV_TIMEOUT:-7200}"
+  health_interval="${AUTODEV_HEALTH_INTERVAL:-5}"
+  task_timeout="${AUTODEV_TASK_TIMEOUT:-300}"
+  lead_loop "$TEAM_NAME" "$timeout" "$health_interval" "$task_timeout"
+
+  # 5. 결과 요약
+  step_summary "$TEAM_NAME"
+  team_cleanup "$TEAM_NAME"
+  exit 0
+fi
+
+# ════════════════════════════════════════
 #  MAIN
 # ════════════════════════════════════════
 main() {
