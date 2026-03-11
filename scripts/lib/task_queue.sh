@@ -1,8 +1,49 @@
 #!/bin/bash
 # ═══════════════════════════════════════
-#  task_queue.sh — 태스크 큐 (flock 동시성 제어)
+#  task_queue.sh — 태스크 큐 (크로스플랫폼 동시성 제어)
 # ═══════════════════════════════════════
-source "$(dirname "$0")/logger.sh" 2>/dev/null || true
+# logger.sh는 autodev.sh에서 먼저 로드됨. 직접 실행 시 fallback.
+if [ -z "${_G:-}" ]; then
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/logger.sh" 2>/dev/null || true
+fi
+
+# ───────────────────────────────────────
+#  _lock / _unlock: 크로스플랫폼 파일 잠금
+#  flock 있으면 flock, 없으면 mkdir 기반 spinlock
+# ───────────────────────────────────────
+_lock() {
+  local lockfile="$1"
+  if command -v flock &>/dev/null; then
+    exec 9>"$lockfile"
+    flock -x 9
+  else
+    local lockdir="${lockfile}.d"
+    local retries=0
+    while ! mkdir "$lockdir" 2>/dev/null; do
+      retries=$((retries + 1))
+      if [ "$retries" -ge 100 ]; then
+        # stale lock 방지: 5초 이상 된 락은 제거
+        if [ -d "$lockdir" ]; then
+          local lock_age
+          lock_age=$(( $(date +%s) - $(stat -f %m "$lockdir" 2>/dev/null || echo 0) ))
+          if [ "$lock_age" -ge 5 ]; then
+            rmdir "$lockdir" 2>/dev/null || true
+          fi
+        fi
+      fi
+      sleep 0.05
+    done
+  fi
+}
+
+_unlock() {
+  local lockfile="$1"
+  if command -v flock &>/dev/null; then
+    exec 9>&-
+  else
+    rmdir "${lockfile}.d" 2>/dev/null || true
+  fi
+}
 
 # ───────────────────────────────────────
 #  tq_init: 태스크 큐 초기화
@@ -27,41 +68,41 @@ tq_add() {
   local depends_on="${4:-}"
   local lockfile="${queue_file}.lock"
 
-  (
-    flock -x 9
-    local count
-    count=$(jq '.tasks | length' "$queue_file")
-    local task_id
-    task_id="task_$(printf '%03d' $((count + 1)))"
+  _lock "$lockfile"
 
-    # depends_on을 JSON 배열로 변환
-    local deps_json="[]"
-    if [ -n "$depends_on" ]; then
-      deps_json=$(echo "$depends_on" | tr ',' '\n' | \
-        jq -R . | jq -s .)
-    fi
+  local count
+  count=$(jq '.tasks | length' "$queue_file")
+  local task_id
+  task_id="task_$(printf '%03d' $((count + 1)))"
 
-    jq --arg id "$task_id" \
-       --arg subject "$subject" \
-       --arg desc "$description" \
-       --argjson deps "$deps_json" \
-       --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-       '.tasks += [{
-         id: $id,
-         subject: $subject,
-         description: $desc,
-         depends_on: $deps,
-         status: "pending",
-         owner: null,
-         created_at: $ts,
-         started_at: null,
-         completed_at: null,
-         result: null
-       }]' "$queue_file" > "${queue_file}.tmp" \
-    && mv "${queue_file}.tmp" "$queue_file"
+  # depends_on을 JSON 배열로 변환
+  local deps_json="[]"
+  if [ -n "$depends_on" ]; then
+    deps_json=$(echo "$depends_on" | tr ',' '\n' | \
+      jq -R . | jq -s .)
+  fi
 
-    echo "$task_id"
-  ) 9>"$lockfile"
+  jq --arg id "$task_id" \
+     --arg subject "$subject" \
+     --arg desc "$description" \
+     --argjson deps "$deps_json" \
+     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     '.tasks += [{
+       id: $id,
+       subject: $subject,
+       description: $desc,
+       depends_on: $deps,
+       status: "pending",
+       owner: null,
+       created_at: $ts,
+       started_at: null,
+       completed_at: null,
+       result: null
+     }]' "$queue_file" > "${queue_file}.tmp" \
+  && mv "${queue_file}.tmp" "$queue_file"
+
+  _unlock "$lockfile"
+  echo "$task_id"
 }
 
 # ───────────────────────────────────────
@@ -74,39 +115,39 @@ tq_claim() {
   local agent_name="$2"
   local lockfile="${queue_file}.lock"
 
-  (
-    flock -x 9
+  _lock "$lockfile"
 
-    # 완료된 태스크 ID 목록
-    local completed_ids
-    completed_ids=$(jq -r '[.tasks[] | select(.status=="completed") | .id]' "$queue_file")
+  # 완료된 태스크 ID 목록
+  local completed_ids
+  completed_ids=$(jq -r '[.tasks[] | select(.status=="completed") | .id]' "$queue_file")
 
-    # pending + 의존성 모두 완료된 첫 태스크 선택
-    local task_id
-    task_id=$(jq -r \
-      --argjson completed "$completed_ids" \
-      '.tasks[]
-       | select(.status == "pending" and .owner == null)
-       | select(
-           (.depends_on | length) == 0 or
-           (.depends_on | all(. as $dep | $completed | index($dep) != null))
-         )
-       | .id' \
-      "$queue_file" 2>/dev/null | head -1)
+  # pending + 의존성 모두 완료된 첫 태스크 선택
+  local task_id
+  task_id=$(jq -r \
+    --argjson completed "$completed_ids" \
+    '.tasks[]
+     | select(.status == "pending" and .owner == null)
+     | select(
+         (.depends_on | length) == 0 or
+         (.depends_on | all(. as $dep | $completed | index($dep) != null))
+       )
+     | .id' \
+    "$queue_file" 2>/dev/null | head -1)
 
-    if [ -z "$task_id" ]; then
-      echo "none"
-    else
-      jq --arg id "$task_id" \
-         --arg agent "$agent_name" \
-         --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-         '(.tasks[] | select(.id == $id)) |=
-           (.owner = $agent | .status = "in_progress" | .started_at = $ts)' \
-         "$queue_file" > "${queue_file}.tmp" \
-      && mv "${queue_file}.tmp" "$queue_file"
-      echo "$task_id"
-    fi
-  ) 9>"$lockfile"
+  if [ -z "$task_id" ]; then
+    _unlock "$lockfile"
+    echo "none"
+  else
+    jq --arg id "$task_id" \
+       --arg agent "$agent_name" \
+       --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+       '(.tasks[] | select(.id == $id)) |=
+         (.owner = $agent | .status = "in_progress" | .started_at = $ts)' \
+       "$queue_file" > "${queue_file}.tmp" \
+    && mv "${queue_file}.tmp" "$queue_file"
+    _unlock "$lockfile"
+    echo "$task_id"
+  fi
 }
 
 # ───────────────────────────────────────
@@ -119,16 +160,15 @@ tq_complete() {
   local result="${3:-완료}"
   local lockfile="${queue_file}.lock"
 
-  (
-    flock -x 9
-    jq --arg id "$task_id" \
-       --arg result "$result" \
-       --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-       '(.tasks[] | select(.id == $id)) |=
-         (.status = "completed" | .completed_at = $ts | .result = $result)' \
-       "$queue_file" > "${queue_file}.tmp" \
-    && mv "${queue_file}.tmp" "$queue_file"
-  ) 9>"$lockfile"
+  _lock "$lockfile"
+  jq --arg id "$task_id" \
+     --arg result "$result" \
+     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     '(.tasks[] | select(.id == $id)) |=
+       (.status = "completed" | .completed_at = $ts | .result = $result)' \
+     "$queue_file" > "${queue_file}.tmp" \
+  && mv "${queue_file}.tmp" "$queue_file"
+  _unlock "$lockfile"
 }
 
 # ───────────────────────────────────────
@@ -140,16 +180,15 @@ tq_fail() {
   local reason="${3:-실패}"
   local lockfile="${queue_file}.lock"
 
-  (
-    flock -x 9
-    jq --arg id "$task_id" \
-       --arg reason "$reason" \
-       --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-       '(.tasks[] | select(.id == $id)) |=
-         (.status = "failed" | .completed_at = $ts | .result = $reason)' \
-       "$queue_file" > "${queue_file}.tmp" \
-    && mv "${queue_file}.tmp" "$queue_file"
-  ) 9>"$lockfile"
+  _lock "$lockfile"
+  jq --arg id "$task_id" \
+     --arg reason "$reason" \
+     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     '(.tasks[] | select(.id == $id)) |=
+       (.status = "failed" | .completed_at = $ts | .result = $reason)' \
+     "$queue_file" > "${queue_file}.tmp" \
+  && mv "${queue_file}.tmp" "$queue_file"
+  _unlock "$lockfile"
 }
 
 # ───────────────────────────────────────

@@ -2,10 +2,16 @@
 # ═══════════════════════════════════════════════════════
 #  team_manager.sh — 팀/에이전트 생명주기 관리
 # ═══════════════════════════════════════════════════════
-AUTODEV_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-source "$AUTODEV_ROOT/lib/logger.sh"
-source "$AUTODEV_ROOT/lib/task_queue.sh"
-source "$AUTODEV_ROOT/lib/messenger.sh"
+# autodev.sh에서 AUTODEV_ROOT가 이미 설정된 경우 재사용
+if [ -z "${AUTODEV_ROOT:-}" ]; then
+  AUTODEV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+# 이미 로드된 경우 skip
+if ! declare -f tq_init &>/dev/null; then
+  source "$AUTODEV_ROOT/lib/logger.sh"
+  source "$AUTODEV_ROOT/lib/task_queue.sh"
+  source "$AUTODEV_ROOT/lib/messenger.sh"
+fi
 
 TEAMS_ROOT="${HANDLE_IT_TEAMS_ROOT:-${AUTODEV_TEAMS_ROOT:-$HOME/.handle-it/teams}}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
@@ -68,7 +74,7 @@ QUEUE_FILE="\$TEAM_DIR/tasks/queue.json"
 INBOX_DIR="\$TEAM_DIR/inbox"
 LOG_FILE="$log_file"
 CLAUDE_BIN="$CLAUDE_BIN"
-PROJECT_DIR="\$(cat "\$TEAM_DIR/../project_dir" 2>/dev/null || echo '/tmp/autodev_project')"
+PROJECT_DIR="\$(cat "\$TEAM_DIR/project_dir" 2>/dev/null || echo '/tmp/autodev_project')"
 
 source "\$AUTODEV_ROOT/lib/logger.sh"
 source "\$AUTODEV_ROOT/lib/task_queue.sh"
@@ -144,7 +150,7 @@ while true; do
 PROMPT_EOF
   )
 
-  RESULT=\$(\$CLAUDE_BIN --print \
+  RESULT=\$(unset CLAUDECODE; \$CLAUDE_BIN --print \
     --allowedTools "$allowed_tools" \
     --dangerously-skip-permissions \
     -p "\$CLAUDE_PROMPT" 2>&1) || RESULT="실행 실패"
@@ -356,7 +362,7 @@ team_cleanup() {
 
   # config 상태 업데이트
   if [ -f "$config" ]; then
-    jq '.status = "terminated" | .terminated_at = now | todate' \
+    jq '.status = "terminated" | .terminated_at = (now | todate)' \
       "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
   fi
 

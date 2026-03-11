@@ -15,6 +15,9 @@ set -euo pipefail
 AUTODEV_ROOT="$(cd "$(dirname "$0")" && pwd)"
 export AUTODEV_ROOT
 
+AUTODEV_PROMPTS="${AUTODEV_PROMPTS:-$(cd "$AUTODEV_ROOT/.." && pwd)/prompts}"
+export AUTODEV_PROMPTS
+
 TEAMS_ROOT="${HANDLE_IT_TEAMS_ROOT:-${AUTODEV_TEAMS_ROOT:-$HOME/.handle-it/teams}}"
 export TEAMS_ROOT
 
@@ -108,12 +111,12 @@ step_register_tasks() {
   T_PRD=$(tq_add "$queue" \
     "PRD 작성" \
     "$(sed "s|{{IDEA}}|$IDEA|g; s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
-      "$AUTODEV_ROOT/prompts/planner.md")")
+      "$AUTODEV_PROMPTS/planner.md")")
 
   T_STACK=$(tq_add "$queue" \
     "기술스택 결정" \
     "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
-      "$AUTODEV_ROOT/prompts/architect.md")")
+      "$AUTODEV_PROMPTS/architect.md")")
 
   # ── Phase 2: PRD 완료 후 ──
   T_DESIGN=$(tq_add "$queue" \
@@ -124,45 +127,45 @@ step_register_tasks() {
   T_TASKS=$(tq_add "$queue" \
     "개발 태스크 분해" \
     "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
-      "$AUTODEV_ROOT/prompts/architect.md") — 태스크 분해 단계만 실행" \
+      "$AUTODEV_PROMPTS/architect.md") — 태스크 분해 단계만 실행" \
     "$T_PRD,$T_STACK")
 
   # ── Phase 3: 태스크 분해 완료 후 ──
   T_SETUP=$(tq_add "$queue" \
     "프로젝트 초기 세팅" \
     "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g; s|{{TASK_DESCRIPTION}}|stack.json의 기술스택으로 프로젝트 초기화. package.json, tsconfig, eslint, tailwind 설정|g" \
-      "$AUTODEV_ROOT/prompts/developer.md")" \
+      "$AUTODEV_PROMPTS/developer.md")" \
     "$T_TASKS")
 
   T_AUTH=$(tq_add "$queue" \
     "인증 시스템 구현" \
     "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g; s|{{TASK_DESCRIPTION}}|stack.json의 auth 스택으로 로그인/회원가입 구현. 소셜 로그인 포함|g" \
-      "$AUTODEV_ROOT/prompts/developer.md")" \
+      "$AUTODEV_PROMPTS/developer.md")" \
     "$T_SETUP")
 
   T_CORE=$(tq_add "$queue" \
     "핵심 기능 구현" \
     "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g; s|{{TASK_DESCRIPTION}}|prd.md의 P0 기능 구현. 각 기능은 독립 컴포넌트로 분리|g" \
-      "$AUTODEV_ROOT/prompts/developer.md")" \
+      "$AUTODEV_PROMPTS/developer.md")" \
     "$T_AUTH")
 
   T_UI=$(tq_add "$queue" \
     "UI 컴포넌트 구현" \
     "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g; s|{{TASK_DESCRIPTION}}|design_spec.json 기반 공통 UI 컴포넌트 구현. Button, Card, Input, Modal, Navigation|g" \
-      "$AUTODEV_ROOT/prompts/developer.md")" \
+      "$AUTODEV_PROMPTS/developer.md")" \
     "$T_DESIGN,$T_SETUP")
 
   # ── Phase 4: 코드 완성 후 ──
   T_QA=$(tq_add "$queue" \
     "QA 및 자동 수정" \
     "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
-      "$AUTODEV_ROOT/prompts/qa.md")" \
+      "$AUTODEV_PROMPTS/qa.md")" \
     "$T_CORE,$T_UI")
 
   T_GIT=$(tq_add "$queue" \
     "Git 커밋 및 PR 생성" \
     "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
-      "$AUTODEV_ROOT/prompts/git.md")" \
+      "$AUTODEV_PROMPTS/git.md")" \
     "$T_QA")
 
   log_success "태스크 등록 완료 (총 9개)"

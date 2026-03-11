@@ -2,7 +2,10 @@
 # ═══════════════════════════════════════
 #  messenger.sh — 에이전트 간 inbox 통신
 # ═══════════════════════════════════════
-source "$(dirname "$0")/logger.sh" 2>/dev/null || true
+# logger.sh는 autodev.sh에서 먼저 로드됨. 직접 실행 시 fallback.
+if [ -z "${_G:-}" ]; then
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/logger.sh" 2>/dev/null || true
+fi
 
 # ───────────────────────────────────────
 #  msg_send: 메시지 전송
@@ -41,7 +44,7 @@ msg_read() {
   local agent_name="$2"
   local messages="[]"
 
-  for msg_file in "$inbox_dir/${agent_name}_"*.json 2>/dev/null; do
+  for msg_file in "$inbox_dir/${agent_name}_"*.json; do
     [ -f "$msg_file" ] || continue
     local msg
     msg=$(cat "$msg_file")
@@ -60,7 +63,7 @@ msg_peek() {
   local agent_name="$2"
   local count=0
 
-  for msg_file in "$inbox_dir/${agent_name}_"*.json 2>/dev/null; do
+  for msg_file in "$inbox_dir/${agent_name}_"*.json; do
     [ -f "$msg_file" ] && count=$((count + 1))
   done
   echo "$count"

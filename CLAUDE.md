@@ -182,15 +182,23 @@ git push --tags
 - [x] handle-it.config.json 지원 추가 (autodev.config.json 하위 호환 유지)
 - [x] 런타임 경로 ~/.autodev → ~/.handle-it 마이그레이션
 - [x] designer.md 프롬프트 생성
+- [x] 실제 실행 테스트 (`claude --print` 동작 확인)
+- [x] macOS 호환 (flock → mkdir 락, bash 3.2 호환, CLAUDECODE 환경변수 해제)
+- [ ] **리드/오케스트레이터 에이전트** — 에이전트 헬스체크, 실패 태스크 재할당, 타임아웃 감지, 리스폰
+- [ ] **에이전트 작업 보고서** — `reports/task_XXX_agent.json` (생성/수정 파일, 결정사항, 블로커, handoff). 리드가 읽고 충돌 감지·결정 불일치·태스크 재조정
+- [ ] **에이전트별 도구/스킬 세팅** — 역할별 `--allowedTools` 분리 + 스킬 연동 (planner: WebSearch/prd-check, dev: Glob,Grep/frontend-patterns, qa: qa/e2e-test 등)
+- [ ] **실시간 모니터링 대시보드** — 두 가지 방식:
+  - **터미널 TUI**: `handle-it watch` — 에이전트 상태, 현재 태스크, 진행률 실시간 표시 (blessed/ink 기반)
+  - **웹 대시보드**: `handle-it dashboard` — 브라우저에서 확인. 에이전트별 타임라인, 태스크 의존성 그래프, 로그 스트리밍, 생성 파일 목록
+- [ ] **`handle-it resume [팀ID]`** — 세션 끊김 복구 (in_progress → pending 리셋, 에이전트 재스폰)
 - [ ] npm 배포 (npm login → npm publish)
-- [ ] 실제 실행 테스트 (`claude --print` 동작 확인)
 - [ ] README 업데이트 (handle-it 명칭으로)
 
 ---
 
 ## 개발 환경 요구사항
 
-- macOS (flock, bash 4+)
+- macOS (bash 3.2+, flock 불필요)
 - Claude Code CLI (`claude`)
 - Node.js 18+
 - jq (`brew install jq`)
