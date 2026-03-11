@@ -21,6 +21,8 @@ const VERSION = JSON.parse(
 const shellFiles = [
   join(SCRIPTS_DIR, 'autodev.sh'),
   join(SCRIPTS_DIR, 'install.sh'),
+  join(SCRIPTS_DIR, 'watch.sh'),
+  join(SCRIPTS_DIR, 'dashboard.sh'),
   join(SCRIPTS_DIR, 'lib', 'logger.sh'),
   join(SCRIPTS_DIR, 'lib', 'task_queue.sh'),
   join(SCRIPTS_DIR, 'lib', 'messenger.sh'),
@@ -58,6 +60,8 @@ if (!command || command === '--help' || command === '-h') {
     handle-it init                     현재 폴더에 handle-it.config.json 생성
     handle-it status [팀ID]            진행 중인 팀 상태 확인
     handle-it resume [팀ID]            중단된 팀 복구 재실행
+    handle-it watch [팀ID]             실시간 모니터링 TUI
+    handle-it dashboard [팀ID] [포트]  웹 대시보드 (기본 포트: 3847)
     handle-it --version                버전 확인
 
   \x1b[1m예시:\x1b[0m
@@ -230,6 +234,75 @@ if (command === 'resume') {
     });
     child.on('exit', code => process.exit(code ?? 0));
   });
+}
+
+// ─────────────────────────────────────
+//  handle-it watch [팀ID]
+// ─────────────────────────────────────
+if (command === 'watch') {
+  const teamsRoot = process.env.HANDLE_IT_TEAMS_ROOT
+    || process.env.AUTODEV_TEAMS_ROOT
+    || join(process.env.HOME, '.handle-it', 'teams');
+
+  if (!existsSync(teamsRoot)) {
+    console.log('실행 중인 팀 없음');
+    process.exit(0);
+  }
+
+  const { readdirSync, statSync } = await import('fs');
+  const teams = readdirSync(teamsRoot)
+    .filter(d => existsSync(join(teamsRoot, d, 'config.json')))
+    .sort((a, b) => statSync(join(teamsRoot, b)).mtimeMs - statSync(join(teamsRoot, a)).mtimeMs);
+
+  const targetTeam = args[1] || teams[0];
+  if (!targetTeam || !existsSync(join(teamsRoot, targetTeam, 'config.json'))) {
+    console.error('모니터링할 팀을 찾을 수 없음');
+    process.exit(1);
+  }
+
+  const watchSh = join(SCRIPTS_DIR, 'watch.sh');
+  const child = spawn('bash', [watchSh, join(teamsRoot, targetTeam)], {
+    stdio: 'inherit',
+    cwd: process.cwd(),
+  });
+
+  child.on('exit', code => process.exit(code ?? 0));
+  await new Promise(() => {}); // block until child exits
+}
+
+// ─────────────────────────────────────
+//  handle-it dashboard [팀ID] [포트]
+// ─────────────────────────────────────
+if (command === 'dashboard') {
+  const teamsRoot = process.env.HANDLE_IT_TEAMS_ROOT
+    || process.env.AUTODEV_TEAMS_ROOT
+    || join(process.env.HOME, '.handle-it', 'teams');
+
+  if (!existsSync(teamsRoot)) {
+    console.log('실행 중인 팀 없음');
+    process.exit(0);
+  }
+
+  const { readdirSync, statSync } = await import('fs');
+  const teams = readdirSync(teamsRoot)
+    .filter(d => existsSync(join(teamsRoot, d, 'config.json')))
+    .sort((a, b) => statSync(join(teamsRoot, b)).mtimeMs - statSync(join(teamsRoot, a)).mtimeMs);
+
+  const targetTeam = args[1] || teams[0];
+  if (!targetTeam || !existsSync(join(teamsRoot, targetTeam, 'config.json'))) {
+    console.error('모니터링할 팀을 찾을 수 없음');
+    process.exit(1);
+  }
+
+  const port = args[2] || '3847';
+  const dashboardSh = join(SCRIPTS_DIR, 'dashboard.sh');
+  const child = spawn('bash', [dashboardSh, join(teamsRoot, targetTeam), port], {
+    stdio: 'inherit',
+    cwd: process.cwd(),
+  });
+
+  child.on('exit', code => process.exit(code ?? 0));
+  await new Promise(() => {});
 }
 
 // ─────────────────────────────────────
