@@ -188,6 +188,8 @@ const env = {
     || join(process.env.HOME, '.handle-it', 'teams'),
   CLAUDE_BIN:        config.claude_bin  || process.env.CLAUDE_BIN  || 'claude',
   AUTODEV_TIMEOUT:   String(config.timeout || 7200),
+  AUTODEV_HEALTH_INTERVAL: String(config.health_interval || 5),
+  AUTODEV_TASK_TIMEOUT:    String(config.task_timeout || 300),
   AUTODEV_AGENTS:    (config.agents || []).join(','),
 };
 

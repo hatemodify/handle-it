@@ -210,7 +210,8 @@ RUNNER_EOF
   jq --arg name "$agent_name" \
      --arg role "$role" \
      --argjson pid "$pid" \
-     '.agents += [{name: $name, role: $role, pid: $pid, status: "running"}]' \
+     --arg tools "$allowed_tools" \
+     '.agents += [{name: $name, role: $role, pid: $pid, status: "running", allowed_tools: $tools, respawn_count: 0}]' \
      "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
 
   log_agent "$agent_name" "스폰 완료 (PID: $pid)"
@@ -351,6 +352,187 @@ team_monitor_tmux() {
 
   tmux select-layout -t "$session" tiled 2>/dev/null || true
   log_info "tmux 모니터: ${_C}tmux attach -t $session${_N}"
+}
+
+# ═══════════════════════════════════════
+#  agent_respawn: 에이전트 재시작
+# ═══════════════════════════════════════
+agent_respawn() {
+  local team_name="$1"
+  local agent_name="$2"
+  local team_dir="$TEAMS_ROOT/$team_name"
+  local runner="$team_dir/agents/${agent_name}.sh"
+  local log_file="$team_dir/logs/${agent_name}.log"
+  local pid_file="$team_dir/agents/${agent_name}.pid"
+  local config="$team_dir/config.json"
+
+  if [ ! -f "$runner" ]; then
+    log_error "러너 스크립트 없음: $runner"
+    return 1
+  fi
+
+  # 이전 프로세스 정리
+  if [ -f "$pid_file" ]; then
+    local old_pid
+    old_pid=$(cat "$pid_file")
+    pkill -P "$old_pid" 2>/dev/null || true
+    kill "$old_pid" 2>/dev/null || true
+  fi
+
+  # 재실행
+  bash "$runner" >> "$log_file" 2>&1 &
+  local new_pid=$!
+  echo "$new_pid" > "$pid_file"
+
+  # config 업데이트
+  jq --arg name "$agent_name" \
+     --argjson pid "$new_pid" \
+     '(.agents[] | select(.name == $name)) |=
+       (.pid = $pid | .status = "running")' \
+     "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+
+  log_agent "$agent_name" "리스폰 완료 (new PID: $new_pid)"
+}
+
+# ═══════════════════════════════════════
+#  _lead_health_check: 에이전트 생존 확인 + 리스폰
+# ═══════════════════════════════════════
+_lead_health_check() {
+  local team_name="$1"
+  local max_respawns="${2:-3}"
+  local team_dir="$TEAMS_ROOT/$team_name"
+  local config="$team_dir/config.json"
+
+  local agents
+  agents=$(jq -r '.agents[] | select(.status == "running") | .name' "$config")
+
+  for agent_name in $agents; do
+    local pid_file="$team_dir/agents/${agent_name}.pid"
+    [ -f "$pid_file" ] || continue
+    local pid
+    pid=$(cat "$pid_file")
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+      log_warn "LEAD  에이전트 사망 감지: $agent_name (PID: $pid)"
+
+      local respawns
+      respawns=$(jq -r --arg name "$agent_name" \
+        '.agents[] | select(.name == $name) | .respawn_count // 0' "$config")
+
+      if [ "$respawns" -ge "$max_respawns" ]; then
+        log_error "LEAD  $agent_name 최대 리스폰 초과 ($max_respawns)"
+        jq --arg name "$agent_name" \
+           '(.agents[] | select(.name == $name)) |= (.status = "dead")' \
+           "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+        continue
+      fi
+
+      agent_respawn "$team_name" "$agent_name"
+
+      jq --arg name "$agent_name" \
+         '(.agents[] | select(.name == $name)) |=
+           (.respawn_count = ((.respawn_count // 0) + 1))' \
+         "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+    fi
+  done
+}
+
+# ═══════════════════════════════════════
+#  _lead_check_stale_tasks: 타임아웃 태스크 리셋
+# ═══════════════════════════════════════
+_lead_check_stale_tasks() {
+  local team_name="$1"
+  local task_timeout="${2:-300}"
+  local queue="$TEAMS_ROOT/$team_name/tasks/queue.json"
+
+  local stale_ids
+  stale_ids=$(tq_stale_tasks "$queue" "$task_timeout")
+
+  for task_id in $stale_ids; do
+    local owner
+    owner=$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | .owner' "$queue")
+    log_warn "LEAD  태스크 타임아웃: $task_id (owner: $owner, ${task_timeout}초 초과)"
+    tq_reset "$queue" "$task_id" "타임아웃 리셋 (${task_timeout}초)"
+  done
+}
+
+# ═══════════════════════════════════════
+#  _lead_read_inbox: 리드 수신 메시지 처리
+# ═══════════════════════════════════════
+_lead_read_inbox() {
+  local team_name="$1"
+  local inbox_dir="$TEAMS_ROOT/$team_name/inbox"
+
+  local messages
+  messages=$(msg_read "$inbox_dir" "lead")
+  local count
+  count=$(echo "$messages" | jq 'length')
+
+  if [ "$count" -gt 0 ]; then
+    echo "$messages" | jq -r '.[] | "\(.from): \(.content)"' | while read -r line; do
+      log_info "LEAD  $line"
+    done
+  fi
+}
+
+# ═══════════════════════════════════════
+#  lead_loop: 오케스트레이터 메인 루프
+# ═══════════════════════════════════════
+lead_loop() {
+  local team_name="$1"
+  local timeout="${2:-7200}"
+  local health_interval="${3:-5}"
+  local task_timeout="${4:-300}"
+  local queue="$TEAMS_ROOT/$team_name/tasks/queue.json"
+  local spinner=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+  local si=0 elapsed=0
+
+  log_step "LEAD  오케스트레이터 시작"
+
+  while true; do
+    # 헬스체크 + 타임아웃 감지 + 인박스 (매 health_interval초)
+    if [ $((elapsed % health_interval)) -eq 0 ] && [ "$elapsed" -gt 0 ]; then
+      _lead_health_check "$team_name" 3
+      _lead_check_stale_tasks "$team_name" "$task_timeout"
+      _lead_read_inbox "$team_name"
+    fi
+
+    # 진행률 표시
+    local stats total completed failed in_progress
+    stats=$(tq_stats "$queue")
+    total=$(echo "$stats" | jq '.total')
+    completed=$(echo "$stats" | jq '.completed')
+    failed=$(echo "$stats" | jq '.failed')
+    in_progress=$(echo "$stats" | jq '.in_progress')
+
+    local progress=0
+    [ "$total" -gt 0 ] && progress=$(( completed * 20 / total ))
+    local bar="" j
+    for ((j=0; j<20; j++)); do
+      [ $j -lt $progress ] && bar+="█" || bar+="░"
+    done
+
+    printf "\r  %s [${_G}%s${_N}] ${_G}%d${_N}/${_W}%d${_N}  진행:${_C}%d${_N}  실패:${_R}%d${_N}  %ds " \
+      "${spinner[$si]}" "$bar" "$completed" "$total" "$in_progress" "$failed" "$elapsed"
+
+    # 완료 확인
+    if tq_all_done "$queue"; then
+      echo -e "\n\n${_G}✓ 모든 태스크 완료${_N}"
+      log_success "LEAD  파이프라인 완료 (${elapsed}초)"
+      return 0
+    fi
+
+    # 타임아웃
+    if [ "$elapsed" -ge "$timeout" ]; then
+      echo -e "\n\n${_R}✗ 타임아웃 ($timeout초)${_N}"
+      log_error "LEAD  타임아웃"
+      return 1
+    fi
+
+    si=$(( (si+1) % 10 ))
+    elapsed=$((elapsed + 1))
+    sleep 1
+  done
 }
 
 # ═══════════════════════════════════════

@@ -220,7 +220,7 @@ step_spawn_agents() {
 step_wait() {
   local team="$1"
 
-  log_step "STEP 4/5  실행 중..."
+  log_step "STEP 4/5  리드 에이전트 실행 중..."
 
   # tmux 시각화 (tmux 있는 경우)
   if command -v tmux &>/dev/null && [ -n "${TMUX:-}" ]; then
@@ -228,8 +228,11 @@ step_wait() {
     echo -e "  실시간 확인: ${_C}tmux attach -t ad-$team${_N}"
   fi
 
-  # 완료 대기 (최대 2시간)
-  team_wait "$team" 7200
+  # 리드 오케스트레이터 루프 (헬스체크 + 진행률 + 타임아웃 감지)
+  local timeout="${AUTODEV_TIMEOUT:-7200}"
+  local health_interval="${AUTODEV_HEALTH_INTERVAL:-5}"
+  local task_timeout="${AUTODEV_TASK_TIMEOUT:-300}"
+  lead_loop "$team" "$timeout" "$health_interval" "$task_timeout"
 }
 
 # ════════════════════════════════════════

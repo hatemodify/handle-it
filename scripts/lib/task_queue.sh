@@ -224,3 +224,41 @@ tq_all_done() {
   remaining=$(jq '[.tasks[] | select(.status != "completed" and .status != "failed")] | length' "$queue_file")
   [ "$remaining" -eq 0 ]
 }
+
+# ───────────────────────────────────────
+#  tq_reset: in_progress 태스크를 pending으로 리셋
+#  $1: queue_file  $2: task_id  $3: reason (선택)
+# ───────────────────────────────────────
+tq_reset() {
+  local queue_file="$1"
+  local task_id="$2"
+  local reason="${3:-타임아웃으로 리셋}"
+  local lockfile="${queue_file}.lock"
+
+  _lock "$lockfile"
+  jq --arg id "$task_id" \
+     --arg reason "$reason" \
+     '(.tasks[] | select(.id == $id)) |=
+       (.status = "pending" | .owner = null | .started_at = null | .result = $reason)' \
+     "$queue_file" > "${queue_file}.tmp" \
+  && mv "${queue_file}.tmp" "$queue_file"
+  _unlock "$lockfile"
+}
+
+# ───────────────────────────────────────
+#  tq_stale_tasks: 타임아웃된 in_progress 태스크 ID 목록 반환
+#  $1: queue_file  $2: max_age (초, 기본 300)
+# ───────────────────────────────────────
+tq_stale_tasks() {
+  local queue_file="$1"
+  local max_age="${2:-300}"
+  local now
+  now=$(date +%s)
+
+  jq -r --argjson now "$now" --argjson max "$max_age" \
+    '.tasks[]
+     | select(.status == "in_progress")
+     | select(.started_at != null)
+     | select(($now - (.started_at | fromdateiso8601)) > $max)
+     | .id' "$queue_file"
+}
