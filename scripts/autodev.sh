@@ -188,21 +188,28 @@ step_spawn_agents() {
   log_step "STEP 3/5  에이전트 스폰"
 
   # planner + architect: Phase 1 병렬 처리
-  agent_spawn "$team" "planner"   "PRD 작성 및 제품 기획 전문가"
-  agent_spawn "$team" "architect" "기술스택 결정 및 시스템 아키텍처 전문가"
+  agent_spawn "$team" "planner"   "PRD 작성 및 제품 기획 전문가" \
+    "Read,Write,Edit,Bash,WebSearch,WebFetch"
+  agent_spawn "$team" "architect" "기술스택 결정 및 시스템 아키텍처 전문가" \
+    "Read,Write,Edit,Bash,Glob,Grep"
 
   sleep 1
 
   # designer: Phase 2 대기 후 처리
-  agent_spawn "$team" "designer"  "UI/UX 디자인 스펙 전문가"
+  agent_spawn "$team" "designer"  "UI/UX 디자인 스펙 전문가" \
+    "Read,Write,Edit,Bash,Glob,Grep"
 
   # developer: Phase 3~4 핵심 에이전트 (2개 병렬)
-  agent_spawn "$team" "dev1"      "풀스택 개발자 — 핵심 기능 담당"
-  agent_spawn "$team" "dev2"      "풀스택 개발자 — UI 컴포넌트 담당"
+  agent_spawn "$team" "dev1"      "풀스택 개발자 — 핵심 기능 담당" \
+    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch"
+  agent_spawn "$team" "dev2"      "풀스택 개발자 — UI 컴포넌트 담당" \
+    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch"
 
   # qa + git: 마지막 단계
-  agent_spawn "$team" "qa"        "QA 엔지니어 — 테스트 및 품질 보증"
-  agent_spawn "$team" "git"       "Git 관리자 — 커밋 및 PR 생성"
+  agent_spawn "$team" "qa"        "QA 엔지니어 — 테스트 및 품질 보증" \
+    "Read,Write,Edit,Bash,Glob,Grep"
+  agent_spawn "$team" "git"       "Git 관리자 — 커밋 및 PR 생성" \
+    "Read,Write,Edit,Bash,Glob,Grep"
 
   log_success "에이전트 7개 스폰 완료"
 }

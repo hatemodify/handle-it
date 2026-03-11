@@ -28,7 +28,8 @@ team_create() {
     "$team_dir/tasks" \
     "$team_dir/agents" \
     "$team_dir/logs" \
-    "$team_dir/output"
+    "$team_dir/output" \
+    "$team_dir/reports"
 
   cat > "$team_dir/config.json" <<EOF
 {
@@ -119,6 +120,7 @@ while true; do
   TASK_DESC=\$(echo "\$TASK_DATA" | jq -r '.description')
 
   log_agent "$agent_name" "태스크 시작: \$TASK_ID [\$TASK_SUBJECT]"
+  TASK_STARTED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   # 4. Claude 실행
   CLAUDE_PROMPT=\$(cat <<PROMPT_EOF
@@ -161,6 +163,31 @@ PROMPT_EOF
 
   tq_complete "\$QUEUE_FILE" "\$TASK_ID" "\$TASK_RESULT"
   log_agent "$agent_name" "태스크 완료: \$TASK_ID → \$TASK_RESULT"
+
+  # 5-1. 작업 보고서 생성
+  REPORT_DIR="\$TEAM_DIR/reports"
+  mkdir -p "\$REPORT_DIR"
+  REPORT_FILE="\$REPORT_DIR/\${TASK_ID}_${agent_name}.json"
+  COMPLETED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  OUTPUT_EXCERPT=\$(echo "\$RESULT" | tail -c 500)
+  jq -n \
+    --arg task_id "\$TASK_ID" \
+    --arg agent "$agent_name" \
+    --arg status "completed" \
+    --arg started_at "\$TASK_STARTED_AT" \
+    --arg completed_at "\$COMPLETED_AT" \
+    --arg summary "\$TASK_RESULT" \
+    --arg output_excerpt "\$OUTPUT_EXCERPT" \
+    '{
+      task_id: \$task_id,
+      agent: \$agent,
+      status: \$status,
+      started_at: \$started_at,
+      completed_at: \$completed_at,
+      summary: \$summary,
+      output_excerpt: \$output_excerpt
+    }' > "\$REPORT_FILE"
+  log_agent "$agent_name" "보고서 생성: \$REPORT_FILE"
 
   # 6. lead에게 완료 알림
   msg_send "\$INBOX_DIR" "$agent_name" "lead" \
