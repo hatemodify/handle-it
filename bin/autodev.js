@@ -40,7 +40,7 @@ const command = args[0];
 //  autodev --version / -v
 // ─────────────────────────────────────
 if (command === '--version' || command === '-v') {
-  console.log(`autodev-teams v${VERSION}`);
+  console.log(`handle-it v${VERSION}`);
   process.exit(0);
 }
 
@@ -49,23 +49,23 @@ if (command === '--version' || command === '-v') {
 // ─────────────────────────────────────
 if (!command || command === '--help' || command === '-h') {
   console.log(`
-  \x1b[1mautodev-teams\x1b[0m v${VERSION}
+  \x1b[1mhandle-it\x1b[0m v${VERSION}
   AI-powered autonomous development pipeline
 
   \x1b[1m사용법:\x1b[0m
-    autodev "<아이디어>"              프로젝트 자동 생성
-    autodev "<아이디어>" [경로]       출력 경로 지정
-    autodev init                     현재 폴더에 autodev.config.json 생성
-    autodev status [팀ID]            진행 중인 팀 상태 확인
-    autodev --version                버전 확인
+    handle-it "<아이디어>"              프로젝트 자동 생성
+    handle-it "<아이디어>" [경로]       출력 경로 지정
+    handle-it init                     현재 폴더에 handle-it.config.json 생성
+    handle-it status [팀ID]            진행 중인 팀 상태 확인
+    handle-it --version                버전 확인
 
   \x1b[1m예시:\x1b[0m
-    autodev "AI 일기 앱, 감정 분석, 다크모드"
-    autodev "가계부 앱" ~/projects/my-budget
-    autodev init && autodev "내 앱 아이디어"
+    handle-it "AI 일기 앱, 감정 분석, 다크모드"
+    handle-it "가계부 앱" ~/projects/my-budget
+    handle-it init && handle-it "내 앱 아이디어"
 
-  \x1b[1m프로젝트 설정 (autodev.config.json):\x1b[0m
-    autodev init 으로 현재 폴더에 생성 후 수정
+  \x1b[1m프로젝트 설정 (handle-it.config.json):\x1b[0m
+    handle-it init 으로 현재 폴더에 생성 후 수정
   `);
   process.exit(0);
 }
@@ -74,9 +74,9 @@ if (!command || command === '--help' || command === '-h') {
 //  autodev init
 // ─────────────────────────────────────
 if (command === 'init') {
-  const configPath = resolve(process.cwd(), 'autodev.config.json');
+  const configPath = resolve(process.cwd(), 'handle-it.config.json');
   if (existsSync(configPath)) {
-    console.log(`\x1b[33m⚠\x1b[0m  autodev.config.json 이미 존재: ${configPath}`);
+    console.log(`\x1b[33m⚠\x1b[0m  handle-it.config.json 이미 존재: ${configPath}`);
     process.exit(0);
   }
 
@@ -91,8 +91,8 @@ if (command === 'init') {
   };
 
   writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
-  console.log(`\x1b[32m✓\x1b[0m  autodev.config.json 생성됨`);
-  console.log(`    수정 후 autodev "<아이디어>" 실행하세요.`);
+  console.log(`\x1b[32m✓\x1b[0m  handle-it.config.json 생성됨`);
+  console.log(`    수정 후 handle-it "<아이디어>" 실행하세요.`);
   process.exit(0);
 }
 
@@ -100,8 +100,9 @@ if (command === 'init') {
 //  autodev status
 // ─────────────────────────────────────
 if (command === 'status') {
-  const teamsRoot = process.env.AUTODEV_TEAMS_ROOT
-    || join(process.env.HOME, '.autodev', 'teams');
+  const teamsRoot = process.env.HANDLE_IT_TEAMS_ROOT
+    || process.env.AUTODEV_TEAMS_ROOT
+    || join(process.env.HOME, '.handle-it', 'teams');
 
   if (!existsSync(teamsRoot)) {
     console.log('실행 중인 팀 없음');
@@ -163,11 +164,13 @@ const projectArg = args[1] || '';
 
 // 프로젝트 루트 config 읽기
 let config = {};
-const configPath = resolve(process.cwd(), 'autodev.config.json');
-if (existsSync(configPath)) {
+const configPath = resolve(process.cwd(), 'handle-it.config.json');
+const legacyConfigPath = resolve(process.cwd(), 'autodev.config.json');
+const activeConfigPath = existsSync(configPath) ? configPath : (existsSync(legacyConfigPath) ? legacyConfigPath : null);
+if (activeConfigPath) {
   try {
-    config = JSON.parse(readFileSync(configPath, 'utf-8'));
-    console.log(`\x1b[2m  autodev.config.json 로드됨\x1b[0m`);
+    config = JSON.parse(readFileSync(activeConfigPath, 'utf-8'));
+    console.log(`\x1b[2m  ${activeConfigPath.split('/').pop()} 로드됨\x1b[0m`);
   } catch (e) {
     console.warn(`\x1b[33m⚠\x1b[0m  config 파싱 실패, 기본값 사용`);
   }
@@ -180,8 +183,9 @@ const env = {
   AUTODEV_PROMPTS:   config.prompts_dir
     ? resolve(process.cwd(), config.prompts_dir)
     : PROMPTS_DIR,
-  AUTODEV_TEAMS_ROOT: process.env.AUTODEV_TEAMS_ROOT
-    || join(process.env.HOME, '.autodev', 'teams'),
+  AUTODEV_TEAMS_ROOT: process.env.HANDLE_IT_TEAMS_ROOT
+    || process.env.AUTODEV_TEAMS_ROOT
+    || join(process.env.HOME, '.handle-it', 'teams'),
   CLAUDE_BIN:        config.claude_bin  || process.env.CLAUDE_BIN  || 'claude',
   AUTODEV_TIMEOUT:   String(config.timeout || 7200),
   AUTODEV_AGENTS:    (config.agents || []).join(','),

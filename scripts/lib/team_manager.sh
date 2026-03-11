@@ -7,7 +7,7 @@ source "$AUTODEV_ROOT/lib/logger.sh"
 source "$AUTODEV_ROOT/lib/task_queue.sh"
 source "$AUTODEV_ROOT/lib/messenger.sh"
 
-TEAMS_ROOT="${AUTODEV_TEAMS_ROOT:-$HOME/.autodev/teams}"
+TEAMS_ROOT="${HANDLE_IT_TEAMS_ROOT:-${AUTODEV_TEAMS_ROOT:-$HOME/.handle-it/teams}}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 
 # ═══════════════════════════════════════
@@ -123,7 +123,7 @@ while true; do
 - 역할: $role
 
 ## 프로젝트 컨텍스트
-\$(cat "\$TEAM_DIR/../CLAUDE.md" 2>/dev/null || echo '컨텍스트 없음')
+\$(cat "$HOME/.handle-it/CLAUDE.md" 2>/dev/null || echo '컨텍스트 없음')
 
 ## 현재 태스크
 - ID: \$TASK_ID

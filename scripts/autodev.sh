@@ -15,7 +15,7 @@ set -euo pipefail
 AUTODEV_ROOT="$(cd "$(dirname "$0")" && pwd)"
 export AUTODEV_ROOT
 
-TEAMS_ROOT="${AUTODEV_TEAMS_ROOT:-$HOME/.autodev/teams}"
+TEAMS_ROOT="${HANDLE_IT_TEAMS_ROOT:-${AUTODEV_TEAMS_ROOT:-$HOME/.handle-it/teams}}"
 export TEAMS_ROOT
 
 # ── 라이브러리 로드 ──
@@ -31,7 +31,7 @@ PROJECT_DIR="${2:-$HOME/projects/autodev_$TIMESTAMP}"
 TEAM_NAME="ad_$TIMESTAMP"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 
-export AUTODEV_LOG_FILE="$HOME/.autodev/logs/autodev_$TIMESTAMP.log"
+export AUTODEV_LOG_FILE="$HOME/.handle-it/logs/autodev_$TIMESTAMP.log"
 mkdir -p "$(dirname "$AUTODEV_LOG_FILE")"
 
 # ════════════════════════════════════════
@@ -40,7 +40,7 @@ mkdir -p "$(dirname "$AUTODEV_LOG_FILE")"
 print_banner() {
   echo -e "${_W}"
   echo "  ╔══════════════════════════════════════════╗"
-  echo "  ║          AutoDev  ·  Teams Edition       ║"
+  echo "  ║        handle-it  ·  Teams Edition       ║"
   echo "  ╚══════════════════════════════════════════╝${_N}"
   echo ""
   echo -e "  아이디어  ${_Y}$IDEA${_N}"
@@ -60,7 +60,8 @@ step_init() {
   mkdir -p "$PROJECT_DIR"
 
   # CLAUDE.md — 모든 에이전트가 공유하는 컨텍스트
-  cat > "$HOME/.autodev/CLAUDE.md" <<EOF
+  mkdir -p "$HOME/.handle-it"
+  cat > "$HOME/.handle-it/CLAUDE.md" <<EOF
 # AutoDev 프로젝트 컨텍스트
 
 ## 아이디어
@@ -88,8 +89,7 @@ EOF
 
   # 팀 생성
   TEAM_DIR=$(team_create "$TEAM_NAME")
-  echo "$PROJECT_DIR" > "$HOME/.autodev/teams/$TEAM_NAME/../project_dir" 2>/dev/null || \
-    echo "$PROJECT_DIR" > "$TEAMS_ROOT/$TEAM_NAME/project_dir"
+  echo "$PROJECT_DIR" > "$TEAMS_ROOT/$TEAM_NAME/project_dir"
 
   log_success "초기화 완료"
   echo "$TEAM_DIR"
