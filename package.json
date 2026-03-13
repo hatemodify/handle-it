@@ -1,5 +1,5 @@
 {
-  "name": "handle-it",
+  "name": "@hatemodify/handle-it",
   "version": "1.0.0",
   "description": "AI-powered autonomous development pipeline — 아이디어 한 줄 → 코드 + PR 자동 완성",
   "type": "module",
@@ -23,6 +23,9 @@
   ],
   "author": "J",
   "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/hatemodify/handle-it"
