@@ -20,7 +20,8 @@ msg_send() {
   local msg_type="${5:-info}"
 
   mkdir -p "$inbox_dir"
-  local msg_file="$inbox_dir/${to}_$(date +%s%N).json"
+  local msg_file
+  msg_file="$inbox_dir/${to}_$(date +%s%N).json"
 
   cat > "$msg_file" <<EOF
 {

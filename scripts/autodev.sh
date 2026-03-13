@@ -189,11 +189,11 @@ step_register_tasks() {
       "$AUTODEV_PROMPTS/qa.md")" \
     "$T_CORE,$T_UI")
 
-  T_GIT=$(tq_add "$queue" \
+  tq_add "$queue" \
     "Git 커밋 및 PR 생성" \
     "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
       "$AUTODEV_PROMPTS/git.md")" \
-    "$T_QA")
+    "$T_QA" > /dev/null
 
   log_success "태스크 등록 완료 (총 9개)"
 
@@ -284,7 +284,7 @@ step_summary() {
     ! -path "*/.next/*" \
     ! -path "*/.git/*" \
     | sort | while read -r f; do
-    echo -e "  ${_G}+${_N} ${f#$PROJECT_DIR/}"
+    echo -e "  ${_G}+${_N} ${f#"$PROJECT_DIR"/}"
   done
 
   # QA 리포트
@@ -313,7 +313,8 @@ if [ "${1:-}" = "__resume__" ]; then
   TEAM_DIR="$TEAMS_ROOT/$TEAM_NAME"
   PROJECT_DIR="$(cat "$TEAM_DIR/project_dir" 2>/dev/null || echo '/tmp/autodev_project')"
 
-  export AUTODEV_LOG_FILE="$HOME/.handle-it/logs/resume_$(date +%Y%m%d_%H%M%S).log"
+  AUTODEV_LOG_FILE="$HOME/.handle-it/logs/resume_$(date +%Y%m%d_%H%M%S).log"
+  export AUTODEV_LOG_FILE
   mkdir -p "$(dirname "$AUTODEV_LOG_FILE")"
 
   source "$AUTODEV_ROOT/lib/logger.sh"
@@ -368,7 +369,8 @@ if [ "${1:-}" = "__rerun__" ]; then
   PROJECT_DIR="$(cat "$TEAM_DIR/project_dir" 2>/dev/null || echo '/tmp/autodev_project')"
   QUEUE="$TEAM_DIR/tasks/queue.json"
 
-  export AUTODEV_LOG_FILE="$HOME/.handle-it/logs/rerun_$(date +%Y%m%d_%H%M%S).log"
+  AUTODEV_LOG_FILE="$HOME/.handle-it/logs/rerun_$(date +%Y%m%d_%H%M%S).log"
+  export AUTODEV_LOG_FILE
   mkdir -p "$(dirname "$AUTODEV_LOG_FILE")"
 
   # 태스크 존재 확인
@@ -428,7 +430,7 @@ $(cat "$HOME/.handle-it/CLAUDE.md" 2>/dev/null || echo '컨텍스트 없음')
       LANG="${LANG:-en_US.UTF-8}" \
       ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
       CLAUDE_API_KEY="${CLAUDE_API_KEY:-}" \
-    $CLAUDE_BIN --print \
+    "$CLAUDE_BIN" --print \
       --allowedTools "Read,Write,Edit,Bash,Glob,Grep,Skill" \
       --dangerously-skip-permissions \
       -p "$CLAUDE_PROMPT" > "$RESULT_FILE" 2>&1
@@ -438,7 +440,7 @@ $(cat "$HOME/.handle-it/CLAUDE.md" 2>/dev/null || echo '컨텍스트 없음')
   ELAPSED_T=0
   TIMED_OUT=false
   while kill -0 $CLAUDE_PID 2>/dev/null; do
-    if [ $ELAPSED_T -ge $RERUN_TIMEOUT ]; then
+    if [ "$ELAPSED_T" -ge "$RERUN_TIMEOUT" ]; then
       kill $CLAUDE_PID 2>/dev/null || true
       wait $CLAUDE_PID 2>/dev/null || true
       TIMED_OUT=true

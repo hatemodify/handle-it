@@ -37,10 +37,12 @@ fi
 
 if [ -n "$SHELL_RC" ]; then
   if ! grep -q 'autodev' "$SHELL_RC" 2>/dev/null; then
-    echo "" >> "$SHELL_RC"
-    echo '# AutoDev Teams' >> "$SHELL_RC"
-    echo "export PATH=\"\$HOME/.autodev:\$PATH\"" >> "$SHELL_RC"
-    echo "alias autodev='$INSTALL_DIR/autodev.sh'" >> "$SHELL_RC"
+    {
+      echo ""
+      echo '# AutoDev Teams'
+      echo "export PATH=\"\$HOME/.autodev:\$PATH\""
+      echo "alias autodev='$INSTALL_DIR/autodev.sh'"
+    } >> "$SHELL_RC"
     echo "✓ PATH 등록 완료: $SHELL_RC"
   fi
 fi

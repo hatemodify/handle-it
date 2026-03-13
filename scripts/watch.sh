@@ -11,8 +11,10 @@ CONFIG="$TEAM_DIR/config.json"
 
 # 색상
 R='\033[0;31m' G='\033[0;32m' Y='\033[1;33m'
+# shellcheck disable=SC2034
 B='\033[0;34m' M='\033[0;35m' C='\033[0;36m'
 W='\033[1;37m' N='\033[0m' DIM='\033[2m'
+# shellcheck disable=SC2034
 BG_G='\033[42m' BG_R='\033[41m' BG_Y='\033[43m' BG_B='\033[44m'
 
 # Ctrl+C로 깨끗하게 종료
@@ -115,7 +117,7 @@ render() {
   # 최근 보고서
   echo -e "  ${W}─── 최근 보고서 ────────────────────────────────${N}"
   if [ -d "$TEAM_DIR/reports" ]; then
-    ls -t "$TEAM_DIR/reports/"*.json 2>/dev/null | head -5 | while read -r report; do
+    find "$TEAM_DIR/reports" -name "*.json" -type f 2>/dev/null | head -5 | while read -r report; do
       local agent summary
       agent=$(jq -r '.agent' "$report" 2>/dev/null)
       summary=$(jq -r '.summary' "$report" 2>/dev/null | cut -c1-60)
