@@ -2,6 +2,7 @@
 # ═══════════════════════════════════════
 #  messenger.sh — 에이전트 간 inbox 통신
 # ═══════════════════════════════════════
+set -euo pipefail
 # logger.sh는 autodev.sh에서 먼저 로드됨. 직접 실행 시 fallback.
 if [ -z "${_G:-}" ]; then
   source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/logger.sh" 2>/dev/null || true

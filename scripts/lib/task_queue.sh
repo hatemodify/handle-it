@@ -2,6 +2,7 @@
 # ═══════════════════════════════════════
 #  task_queue.sh — 태스크 큐 (크로스플랫폼 동시성 제어)
 # ═══════════════════════════════════════
+set -euo pipefail
 # logger.sh는 autodev.sh에서 먼저 로드됨. 직접 실행 시 fallback.
 if [ -z "${_G:-}" ]; then
   source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/logger.sh" 2>/dev/null || true
@@ -46,6 +47,29 @@ _unlock() {
 }
 
 # ───────────────────────────────────────
+#  _safe_jq_write: jq 출력 검증 후 큐 파일 교체
+#  $1: queue_file (${queue_file}.tmp 가 이미 존재해야 함)
+# ───────────────────────────────────────
+_safe_jq_write() {
+  local queue_file="$1"
+  local tmp_file="${queue_file}.tmp"
+
+  if [ ! -s "$tmp_file" ]; then
+    log_error "큐 업데이트 실패: 빈 출력 ($queue_file)" 2>/dev/null || true
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  if ! jq -e '.tasks' "$tmp_file" >/dev/null 2>&1; then
+    log_error "큐 업데이트 실패: 잘못된 큐 형식 ($queue_file)" 2>/dev/null || true
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  mv "$tmp_file" "$queue_file"
+}
+
+# ───────────────────────────────────────
 #  tq_init: 태스크 큐 초기화
 #  $1: queue_file 경로
 # ───────────────────────────────────────
@@ -82,7 +106,7 @@ tq_add() {
       jq -R . | jq -s .)
   fi
 
-  jq --arg id "$task_id" \
+  if ! jq --arg id "$task_id" \
      --arg subject "$subject" \
      --arg desc "$description" \
      --argjson deps "$deps_json" \
@@ -98,8 +122,11 @@ tq_add() {
        started_at: null,
        completed_at: null,
        result: null
-     }]' "$queue_file" > "${queue_file}.tmp" \
-  && mv "${queue_file}.tmp" "$queue_file"
+     }]' "$queue_file" > "${queue_file}.tmp" || ! _safe_jq_write "$queue_file"; then
+    _unlock "$lockfile"
+    log_error "tq_add 실패: $task_id" 2>/dev/null || true
+    return 1
+  fi
 
   _unlock "$lockfile"
   echo "$task_id"
@@ -138,13 +165,16 @@ tq_claim() {
     _unlock "$lockfile"
     echo "none"
   else
-    jq --arg id "$task_id" \
+    if ! jq --arg id "$task_id" \
        --arg agent "$agent_name" \
        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
        '(.tasks[] | select(.id == $id)) |=
          (.owner = $agent | .status = "in_progress" | .started_at = $ts)' \
-       "$queue_file" > "${queue_file}.tmp" \
-    && mv "${queue_file}.tmp" "$queue_file"
+       "$queue_file" > "${queue_file}.tmp" || ! _safe_jq_write "$queue_file"; then
+      _unlock "$lockfile"
+      echo "none"
+      return 0
+    fi
     _unlock "$lockfile"
     echo "$task_id"
   fi
@@ -161,13 +191,16 @@ tq_complete() {
   local lockfile="${queue_file}.lock"
 
   _lock "$lockfile"
-  jq --arg id "$task_id" \
+  if ! jq --arg id "$task_id" \
      --arg result "$result" \
      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '(.tasks[] | select(.id == $id)) |=
        (.status = "completed" | .completed_at = $ts | .result = $result)' \
-     "$queue_file" > "${queue_file}.tmp" \
-  && mv "${queue_file}.tmp" "$queue_file"
+     "$queue_file" > "${queue_file}.tmp" || ! _safe_jq_write "$queue_file"; then
+    _unlock "$lockfile"
+    log_error "tq_complete 실패: $task_id" 2>/dev/null || true
+    return 1
+  fi
   _unlock "$lockfile"
 }
 
@@ -181,13 +214,16 @@ tq_fail() {
   local lockfile="${queue_file}.lock"
 
   _lock "$lockfile"
-  jq --arg id "$task_id" \
+  if ! jq --arg id "$task_id" \
      --arg reason "$reason" \
      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '(.tasks[] | select(.id == $id)) |=
        (.status = "failed" | .completed_at = $ts | .result = $reason)' \
-     "$queue_file" > "${queue_file}.tmp" \
-  && mv "${queue_file}.tmp" "$queue_file"
+     "$queue_file" > "${queue_file}.tmp" || ! _safe_jq_write "$queue_file"; then
+    _unlock "$lockfile"
+    log_error "tq_fail 실패: $task_id" 2>/dev/null || true
+    return 1
+  fi
   _unlock "$lockfile"
 }
 
@@ -236,12 +272,15 @@ tq_reset() {
   local lockfile="${queue_file}.lock"
 
   _lock "$lockfile"
-  jq --arg id "$task_id" \
+  if ! jq --arg id "$task_id" \
      --arg reason "$reason" \
      '(.tasks[] | select(.id == $id)) |=
        (.status = "pending" | .owner = null | .started_at = null | .result = $reason)' \
-     "$queue_file" > "${queue_file}.tmp" \
-  && mv "${queue_file}.tmp" "$queue_file"
+     "$queue_file" > "${queue_file}.tmp" || ! _safe_jq_write "$queue_file"; then
+    _unlock "$lockfile"
+    log_error "tq_reset 실패: $task_id" 2>/dev/null || true
+    return 1
+  fi
   _unlock "$lockfile"
 }
 
@@ -261,4 +300,73 @@ tq_stale_tasks() {
      | select(.started_at != null)
      | select(($now - (.started_at | fromdateiso8601)) > $max)
      | .id' "$queue_file"
+}
+
+# ───────────────────────────────────────
+#  tq_validate_dag: 의존성 순환 감지 (위상정렬)
+#  $1: queue_file
+#  반환: 0=정상, 1=순환 또는 잘못된 의존성
+# ───────────────────────────────────────
+tq_validate_dag() {
+  local queue_file="$1"
+  local total
+  total=$(jq '.tasks | length' "$queue_file")
+  [ "$total" -eq 0 ] && return 0
+
+  # 존재하지 않는 태스크 의존성 체크
+  local invalid_deps
+  invalid_deps=$(jq -r '
+    .tasks | map(.id) as $all_ids |
+    [.[] | .id as $tid | .depends_on[] |
+      select(. as $d | $all_ids | index($d) == null) |
+      "\($tid) → \(.)"] |
+    join(", ")
+  ' "$queue_file")
+
+  if [ -n "$invalid_deps" ]; then
+    log_error "존재하지 않는 의존성: $invalid_deps"
+    return 1
+  fi
+
+  # 위상정렬로 순환 감지
+  local resolved="[]"
+  local prev_count=-1
+
+  while true; do
+    local resolved_count
+    resolved_count=$(echo "$resolved" | jq 'length')
+
+    # 진전 없음 → 순환
+    if [ "$resolved_count" -eq "$prev_count" ]; then
+      local cycle_tasks
+      cycle_tasks=$(jq -r --argjson resolved "$resolved" '
+        [.tasks[] | select(.id as $id | $resolved | index($id) == null) | .id] | join(", ")
+      ' "$queue_file")
+      log_error "의존성 순환 감지: $cycle_tasks"
+      return 1
+    fi
+
+    # 전부 해결됨 → 정상
+    if [ "$resolved_count" -ge "$total" ]; then
+      return 0
+    fi
+
+    prev_count=$resolved_count
+
+    # 의존성 충족된 태스크 찾기
+    local new_ids
+    new_ids=$(jq -r --argjson resolved "$resolved" '
+      [.tasks[] |
+        select(.id as $id | $resolved | index($id) == null) |
+        select(
+          (.depends_on | length) == 0 or
+          (.depends_on | all(. as $dep | $resolved | index($dep) != null))
+        ) | .id
+      ] | .[]
+    ' "$queue_file")
+
+    for tid in $new_ids; do
+      resolved=$(echo "$resolved" | jq --arg id "$tid" '. += [$id]')
+    done
+  done
 }

@@ -2,6 +2,7 @@
 # ═══════════════════════════════════════
 #  logger.sh — 로깅 유틸리티
 # ═══════════════════════════════════════
+set -euo pipefail
 
 # 색상
 export _R='\033[0;31m' _G='\033[0;32m' _Y='\033[1;33m'
@@ -19,3 +20,11 @@ log_error()   { echo -e "${_R}[$(_ts)][ERR ]${_N}  $*" | tee -a "$AUTODEV_LOG_FI
 log_step()    { echo -e "\n${_W}[$(_ts)]━━━ $* ━━━${_N}" | tee -a "$AUTODEV_LOG_FILE"; }
 log_agent()   { echo -e "${_M}[$(_ts)][${1}]${_N} ${2}" | tee -a "$AUTODEV_LOG_FILE"; }
 log_msg()     { echo -e "${_C}[$(_ts)][MSG]${_N}  ${_M}$1${_N} → ${_M}$2${_N}: $3" | tee -a "$AUTODEV_LOG_FILE"; }
+
+# 에러 + 복구 힌트
+log_error_hint() {
+  local error="$1"
+  local hint="$2"
+  echo -e "${_R}[$(_ts)][ERR ]${_N}  $error" | tee -a "$AUTODEV_LOG_FILE"
+  echo -e "  ${_DIM}→ $hint${_N}" | tee -a "$AUTODEV_LOG_FILE"
+}

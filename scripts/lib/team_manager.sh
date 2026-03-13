@@ -2,6 +2,7 @@
 # ═══════════════════════════════════════════════════════
 #  team_manager.sh — 팀/에이전트 생명주기 관리
 # ═══════════════════════════════════════════════════════
+set -euo pipefail
 # autodev.sh에서 AUTODEV_ROOT가 이미 설정된 경우 재사용
 if [ -z "${AUTODEV_ROOT:-}" ]; then
   AUTODEV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -83,6 +84,17 @@ source "\$AUTODEV_ROOT/lib/messenger.sh"
 
 export AUTODEV_LOG_FILE="\$LOG_FILE"
 
+# Heartbeat (백그라운드 — 행 프로세스 감지용)
+HEARTBEAT_FILE="\$TEAM_DIR/agents/${agent_name}.heartbeat"
+(
+  while true; do
+    date +%s > "\$HEARTBEAT_FILE"
+    sleep 5
+  done
+) &
+HEARTBEAT_PID=\$!
+trap "kill \$HEARTBEAT_PID 2>/dev/null || true; rm -f \$HEARTBEAT_FILE" EXIT
+
 log_agent "$agent_name" "시작"
 
 # ── 메인 루프 ──
@@ -148,21 +160,72 @@ while true; do
 1. 태스크를 완전히 완료할 것
 2. 결과물은 반드시 \$PROJECT_DIR 에 저장
 3. 다른 에이전트에게 전달할 내용은 \$TEAM_DIR/inbox/{에이전트명}_{timestamp}.json 으로 저장
-4. 완료 후 마지막 줄에 반드시 출력: TASK_RESULT: [완료 요약]
+4. 프롬프트에 **활용 스킬** 섹션이 있으면 Skill 도구로 해당 스킬을 반드시 호출하여 작업 품질을 높일 것
+5. 완료 후 마지막 줄에 반드시 출력: TASK_RESULT: [완료 요약]
 PROMPT_EOF
   )
 
-  RESULT=\$(unset CLAUDECODE; \$CLAUDE_BIN --print \
-    --allowedTools "$allowed_tools" \
-    --dangerously-skip-permissions \
-    -p "\$CLAUDE_PROMPT" 2>&1) || RESULT="실행 실패"
+  # Claude 실행 (타임아웃 + 환경변수 격리)
+  CLAUDE_TASK_TIMEOUT="\${AUTODEV_TASK_TIMEOUT:-300}"
+  RESULT_FILE=\$(mktemp)
+  (
+    env -i \\
+      HOME="\$HOME" \\
+      PATH="\$PATH" \\
+      TERM="\${TERM:-xterm}" \\
+      LANG="\${LANG:-en_US.UTF-8}" \\
+      ANTHROPIC_API_KEY="\${ANTHROPIC_API_KEY:-}" \\
+      CLAUDE_API_KEY="\${CLAUDE_API_KEY:-}" \\
+      AUTODEV_TASK_TIMEOUT="\$CLAUDE_TASK_TIMEOUT" \\
+    \$CLAUDE_BIN --print \\
+      --allowedTools "$allowed_tools" \\
+      --dangerously-skip-permissions \\
+      -p "\$CLAUDE_PROMPT" > "\$RESULT_FILE" 2>&1
+  ) &
+  CLAUDE_PID=\$!
+
+  ELAPSED_T=0
+  TIMED_OUT=false
+  while kill -0 \$CLAUDE_PID 2>/dev/null; do
+    if [ \$ELAPSED_T -ge \$CLAUDE_TASK_TIMEOUT ]; then
+      kill \$CLAUDE_PID 2>/dev/null || true
+      wait \$CLAUDE_PID 2>/dev/null || true
+      TIMED_OUT=true
+      break
+    fi
+    sleep 2
+    ELAPSED_T=\$((ELAPSED_T + 2))
+  done
+
+  if \$TIMED_OUT; then
+    RESULT="태스크 타임아웃 (\${CLAUDE_TASK_TIMEOUT}초 초과)"
+    log_agent "$agent_name" "Claude 타임아웃: \$TASK_ID (\${CLAUDE_TASK_TIMEOUT}초)"
+  else
+    EXIT_CODE=0
+    wait \$CLAUDE_PID 2>/dev/null || EXIT_CODE=\$?
+    if [ \$EXIT_CODE -ne 0 ]; then
+      RESULT=\$(cat "\$RESULT_FILE" 2>/dev/null)
+      [ -z "\$RESULT" ] && RESULT="실행 실패 (exit: \$EXIT_CODE)"
+    else
+      RESULT=\$(cat "\$RESULT_FILE")
+    fi
+  fi
+  rm -f "\$RESULT_FILE"
 
   # 5. 결과 파싱 + 태스크 완료
   TASK_RESULT=\$(echo "\$RESULT" | grep '^TASK_RESULT:' | sed 's/TASK_RESULT: //' | tail -1)
-  [ -z "\$TASK_RESULT" ] && TASK_RESULT="완료"
 
-  tq_complete "\$QUEUE_FILE" "\$TASK_ID" "\$TASK_RESULT"
-  log_agent "$agent_name" "태스크 완료: \$TASK_ID → \$TASK_RESULT"
+  # TASK_RESULT 미출력 시 실패 처리 (타임아웃 포함)
+  if \$TIMED_OUT; then
+    tq_fail "\$QUEUE_FILE" "\$TASK_ID" "\$RESULT"
+    log_agent "$agent_name" "태스크 실패 (타임아웃): \$TASK_ID"
+  elif [ -z "\$TASK_RESULT" ]; then
+    tq_fail "\$QUEUE_FILE" "\$TASK_ID" "TASK_RESULT 미출력 — Claude 출력 확인 필요"
+    log_agent "$agent_name" "태스크 실패 (결과 미출력): \$TASK_ID"
+  else
+    tq_complete "\$QUEUE_FILE" "\$TASK_ID" "\$TASK_RESULT"
+    log_agent "$agent_name" "태스크 완료: \$TASK_ID → \$TASK_RESULT"
+  fi
 
   # 5-1. 작업 보고서 생성
   REPORT_DIR="\$TEAM_DIR/reports"
@@ -412,7 +475,29 @@ _lead_health_check() {
     local pid
     pid=$(cat "$pid_file")
 
+    local is_dead=false
+
+    # Check 1: 프로세스 존재 여부
     if ! kill -0 "$pid" 2>/dev/null; then
+      is_dead=true
+    fi
+
+    # Check 2: heartbeat 신선도 (행 프로세스 감지)
+    local heartbeat_file="$team_dir/agents/${agent_name}.heartbeat"
+    if [ "$is_dead" = "false" ] && [ -f "$heartbeat_file" ]; then
+      local last_beat now beat_age
+      last_beat=$(cat "$heartbeat_file" 2>/dev/null || echo 0)
+      now=$(date +%s)
+      beat_age=$((now - last_beat))
+      if [ "$beat_age" -ge 30 ]; then
+        log_warn "LEAD  에이전트 무응답: $agent_name (heartbeat ${beat_age}초 전)"
+        pkill -P "$pid" 2>/dev/null || true
+        kill "$pid" 2>/dev/null || true
+        is_dead=true
+      fi
+    fi
+
+    if [ "$is_dead" = "true" ]; then
       log_warn "LEAD  에이전트 사망 감지: $agent_name (PID: $pid)"
 
       local respawns

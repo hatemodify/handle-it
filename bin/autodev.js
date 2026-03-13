@@ -60,6 +60,8 @@ if (!command || command === '--help' || command === '-h') {
     handle-it init                     현재 폴더에 handle-it.config.json 생성
     handle-it status [팀ID]            진행 중인 팀 상태 확인
     handle-it resume [팀ID]            중단된 팀 복구 재실행
+    handle-it rerun <태스크ID> [팀ID]  특정 태스크만 재실행
+    handle-it logs [팀ID] [필터]       에이전트 로그 조회
     handle-it watch [팀ID]             실시간 모니터링 TUI
     handle-it dashboard [팀ID] [포트]  웹 대시보드 (기본 포트: 3847)
     handle-it --version                버전 확인
@@ -174,6 +176,56 @@ let config = {};
     } catch (e) {
       console.warn(`\x1b[33m⚠\x1b[0m  config 파싱 실패, 기본값 사용`);
     }
+  }
+}
+
+// ── config 스키마 검증 ──
+{
+  const VALID_AGENTS = ['planner', 'architect', 'designer', 'dev1', 'dev2', 'qa', 'git'];
+  const errors = [];
+
+  if (config.timeout !== undefined) {
+    if (typeof config.timeout !== 'number' || config.timeout <= 0) {
+      errors.push(`timeout은 양수여야 합니다 (현재: ${config.timeout})`);
+    }
+  }
+  if (config.task_timeout !== undefined) {
+    if (typeof config.task_timeout !== 'number' || config.task_timeout <= 0) {
+      errors.push(`task_timeout은 양수여야 합니다 (현재: ${config.task_timeout})`);
+    }
+  }
+  if (config.health_interval !== undefined) {
+    if (typeof config.health_interval !== 'number' || config.health_interval <= 0) {
+      errors.push(`health_interval은 양수여야 합니다 (현재: ${config.health_interval})`);
+    }
+  }
+  if (config.agents !== undefined) {
+    if (!Array.isArray(config.agents)) {
+      errors.push('agents는 배열이어야 합니다');
+    } else {
+      const invalid = config.agents.filter(a => !VALID_AGENTS.includes(a));
+      if (invalid.length > 0) {
+        errors.push(`알 수 없는 에이전트: ${invalid.join(', ')} (가능: ${VALID_AGENTS.join(', ')})`);
+      }
+    }
+  }
+  if (config.project_dir !== undefined && config.project_dir !== null) {
+    if (typeof config.project_dir !== 'string') {
+      errors.push('project_dir는 문자열이어야 합니다');
+    } else if (config.project_dir.includes('..')) {
+      errors.push('project_dir에 ".."는 사용할 수 없습니다');
+    }
+  }
+  if (config.prompts_dir !== undefined && config.prompts_dir !== null) {
+    if (typeof config.prompts_dir !== 'string') {
+      errors.push('prompts_dir는 문자열이어야 합니다');
+    }
+  }
+
+  if (errors.length > 0) {
+    console.error(`\x1b[31m✗\x1b[0m  config 검증 실패:`);
+    errors.forEach(e => console.error(`    - ${e}`));
+    process.exit(1);
   }
 }
 
@@ -303,6 +355,135 @@ if (command === 'dashboard') {
 
   child.on('exit', code => process.exit(code ?? 0));
   await new Promise(() => {});
+}
+
+// ─────────────────────────────────────
+//  handle-it rerun <태스크ID> [팀ID]
+// ─────────────────────────────────────
+if (command === 'rerun') {
+  const taskId = args[1];
+  if (!taskId) {
+    console.error('\x1b[31m✗\x1b[0m  사용법: handle-it rerun <task_id> [팀ID]');
+    process.exit(1);
+  }
+
+  const teamsRoot = process.env.HANDLE_IT_TEAMS_ROOT
+    || process.env.AUTODEV_TEAMS_ROOT
+    || join(process.env.HOME, '.handle-it', 'teams');
+
+  if (!existsSync(teamsRoot)) {
+    console.log('실행 중인 팀 없음');
+    process.exit(1);
+  }
+
+  const { readdirSync, statSync } = await import('fs');
+  const teams = readdirSync(teamsRoot)
+    .filter(d => existsSync(join(teamsRoot, d, 'config.json')))
+    .sort((a, b) => statSync(join(teamsRoot, b)).mtimeMs - statSync(join(teamsRoot, a)).mtimeMs);
+
+  const targetTeam = args[2] || teams[0];
+  if (!targetTeam || !existsSync(join(teamsRoot, targetTeam, 'config.json'))) {
+    console.error('팀을 찾을 수 없음');
+    process.exit(1);
+  }
+
+  // Validate task exists in queue
+  const queuePath = join(teamsRoot, targetTeam, 'tasks', 'queue.json');
+  if (existsSync(queuePath)) {
+    const queue = JSON.parse(readFileSync(queuePath, 'utf-8'));
+    const task = queue.tasks.find(t => t.id === taskId);
+    if (!task) {
+      console.error(`\x1b[31m✗\x1b[0m  태스크를 찾을 수 없음: ${taskId}`);
+      console.log('  사용 가능한 태스크:');
+      queue.tasks.forEach(t => {
+        const icon = { completed: '\x1b[32m✓\x1b[0m', failed: '\x1b[31m✗\x1b[0m', pending: '○', in_progress: '\x1b[36m→\x1b[0m' }[t.status] || '○';
+        console.log(`    ${icon} ${t.id}  ${t.subject}  [${t.status}]`);
+      });
+      process.exit(1);
+    }
+  }
+
+  console.log(`\x1b[33m→\x1b[0m  태스크 재실행: ${taskId} (팀: ${targetTeam})`);
+
+  const env = {
+    ...process.env,
+    AUTODEV_ROOT: SCRIPTS_DIR,
+    AUTODEV_PROMPTS: config.prompts_dir
+      ? resolve(process.cwd(), config.prompts_dir)
+      : PROMPTS_DIR,
+    AUTODEV_TEAMS_ROOT: teamsRoot,
+    AUTODEV_TIMEOUT: String(config.timeout || 7200),
+    AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 300),
+    CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
+    HANDLE_IT_RERUN_TEAM: targetTeam,
+    HANDLE_IT_RERUN_TASK: taskId,
+  };
+
+  const child = spawn('bash', [join(SCRIPTS_DIR, 'autodev.sh'), '__rerun__'], {
+    env,
+    stdio: 'inherit',
+    cwd: process.cwd(),
+  });
+
+  await new Promise((_, reject) => {
+    child.on('error', err => {
+      console.error(`\x1b[31m✗\x1b[0m  실행 실패: ${err.message}`);
+      process.exit(1);
+    });
+    child.on('exit', code => process.exit(code ?? 0));
+  });
+}
+
+// ─────────────────────────────────────
+//  handle-it logs [팀ID] [필터]
+// ─────────────────────────────────────
+if (command === 'logs') {
+  const teamsRoot = process.env.HANDLE_IT_TEAMS_ROOT
+    || process.env.AUTODEV_TEAMS_ROOT
+    || join(process.env.HOME, '.handle-it', 'teams');
+
+  if (!existsSync(teamsRoot)) {
+    console.log('실행 중인 팀 없음');
+    process.exit(0);
+  }
+
+  const { readdirSync, statSync } = await import('fs');
+  const teams = readdirSync(teamsRoot)
+    .filter(d => existsSync(join(teamsRoot, d, 'config.json')))
+    .sort((a, b) => statSync(join(teamsRoot, b)).mtimeMs - statSync(join(teamsRoot, a)).mtimeMs);
+
+  const targetTeam = args[1] || teams[0];
+  if (!targetTeam || !existsSync(join(teamsRoot, targetTeam))) {
+    console.error('팀을 찾을 수 없음');
+    process.exit(1);
+  }
+
+  const logsDir = join(teamsRoot, targetTeam, 'logs');
+  if (!existsSync(logsDir)) {
+    console.log('로그 없음');
+    process.exit(0);
+  }
+
+  const filter = args[2] || '';
+  const logFiles = readdirSync(logsDir).filter(f => f.endsWith('.log'));
+  console.log(`\n\x1b[1m팀: ${targetTeam}\x1b[0m  로그 ${logFiles.length}개\n`);
+
+  for (const logFile of logFiles) {
+    const agentName = logFile.replace('.log', '');
+    const content = readFileSync(join(logsDir, logFile), 'utf-8');
+    const lines = content.split('\n').filter(l => l.trim());
+
+    const filtered = filter
+      ? lines.filter(l => l.toLowerCase().includes(filter.toLowerCase()))
+      : lines.slice(-10);
+
+    if (filtered.length > 0) {
+      console.log(`\x1b[35m── ${agentName} ──\x1b[0m`);
+      filtered.forEach(l => console.log(`  ${l}`));
+      console.log('');
+    }
+  }
+  process.exit(0);
 }
 
 // ─────────────────────────────────────

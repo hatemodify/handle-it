@@ -34,6 +34,33 @@ PROJECT_DIR="${2:-$HOME/projects/autodev_$TIMESTAMP}"
 TEAM_NAME="ad_$TIMESTAMP"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 
+# ── 입력 검증 ──
+# 경로 검증: path traversal 방지
+if [[ "$PROJECT_DIR" == *".."* ]]; then
+  log_error "경로에 '..'를 사용할 수 없습니다: $PROJECT_DIR"
+  exit 1
+fi
+
+# 절대 경로로 정규화
+if [[ "$PROJECT_DIR" != /* ]]; then
+  PROJECT_DIR="$(pwd)/$PROJECT_DIR"
+fi
+
+# 시스템 경로 보호
+case "$PROJECT_DIR" in
+  /etc/*|/usr/*|/bin/*|/sbin/*|/var/*|/System/*|/Library/*)
+    log_error "시스템 경로에 프로젝트를 생성할 수 없습니다: $PROJECT_DIR"
+    exit 1
+    ;;
+esac
+
+# sed 치환용 이스케이프 (|, &, \, / 안전 처리)
+_sed_escape() {
+  printf '%s' "$1" | sed 's/[|\\/&]/\\&/g'
+}
+IDEA_ESCAPED=$(_sed_escape "$IDEA")
+PROJECT_DIR_ESCAPED=$(_sed_escape "$PROJECT_DIR")
+
 export AUTODEV_LOG_FILE="$HOME/.handle-it/logs/autodev_$TIMESTAMP.log"
 mkdir -p "$(dirname "$AUTODEV_LOG_FILE")"
 
@@ -110,12 +137,12 @@ step_register_tasks() {
   # ── Phase 1: 병렬 가능 (의존성 없음) ──
   T_PRD=$(tq_add "$queue" \
     "PRD 작성" \
-    "$(sed "s|{{IDEA}}|$IDEA|g; s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
+    "$(sed "s|{{IDEA}}|$IDEA_ESCAPED|g; s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
       "$AUTODEV_PROMPTS/planner.md")")
 
   T_STACK=$(tq_add "$queue" \
     "기술스택 결정" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
+    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
       "$AUTODEV_PROMPTS/architect.md")")
 
   # ── Phase 2: PRD 완료 후 ──
@@ -126,49 +153,55 @@ step_register_tasks() {
 
   T_TASKS=$(tq_add "$queue" \
     "개발 태스크 분해" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
+    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
       "$AUTODEV_PROMPTS/architect.md") — 태스크 분해 단계만 실행" \
     "$T_PRD,$T_STACK")
 
   # ── Phase 3: 태스크 분해 완료 후 ──
   T_SETUP=$(tq_add "$queue" \
     "프로젝트 초기 세팅" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g; s|{{TASK_DESCRIPTION}}|stack.json의 기술스택으로 프로젝트 초기화. package.json, tsconfig, eslint, tailwind 설정|g" \
+    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 기술스택으로 프로젝트 초기화. package.json, tsconfig, eslint, tailwind 설정|g" \
       "$AUTODEV_PROMPTS/developer.md")" \
     "$T_TASKS")
 
   T_AUTH=$(tq_add "$queue" \
     "인증 시스템 구현" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g; s|{{TASK_DESCRIPTION}}|stack.json의 auth 스택으로 로그인/회원가입 구현. 소셜 로그인 포함|g" \
+    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 auth 스택으로 로그인/회원가입 구현. 소셜 로그인 포함|g" \
       "$AUTODEV_PROMPTS/developer.md")" \
     "$T_SETUP")
 
   T_CORE=$(tq_add "$queue" \
     "핵심 기능 구현" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g; s|{{TASK_DESCRIPTION}}|prd.md의 P0 기능 구현. 각 기능은 독립 컴포넌트로 분리|g" \
+    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|prd.md의 P0 기능 구현. 각 기능은 독립 컴포넌트로 분리|g" \
       "$AUTODEV_PROMPTS/developer.md")" \
     "$T_AUTH")
 
   T_UI=$(tq_add "$queue" \
     "UI 컴포넌트 구현" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g; s|{{TASK_DESCRIPTION}}|design_spec.json 기반 공통 UI 컴포넌트 구현. Button, Card, Input, Modal, Navigation|g" \
+    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|design_spec.json 기반 공통 UI 컴포넌트 구현. Button, Card, Input, Modal, Navigation|g" \
       "$AUTODEV_PROMPTS/developer.md")" \
     "$T_DESIGN,$T_SETUP")
 
   # ── Phase 4: 코드 완성 후 ──
   T_QA=$(tq_add "$queue" \
     "QA 및 자동 수정" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
+    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
       "$AUTODEV_PROMPTS/qa.md")" \
     "$T_CORE,$T_UI")
 
   T_GIT=$(tq_add "$queue" \
     "Git 커밋 및 PR 생성" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR|g" \
+    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
       "$AUTODEV_PROMPTS/git.md")" \
     "$T_QA")
 
   log_success "태스크 등록 완료 (총 9개)"
+
+  # DAG 의존성 순환 검증
+  if ! tq_validate_dag "$queue"; then
+    log_error "태스크 의존성 오류 — 파이프라인을 중단합니다"
+    exit 1
+  fi
 
   # 태스크 목록 출력
   echo ""
@@ -189,25 +222,25 @@ step_spawn_agents() {
 
   # planner + architect: Phase 1 병렬 처리
   agent_spawn "$team" "planner"   "PRD 작성 및 제품 기획 전문가" \
-    "Read,Write,Edit,Bash,WebSearch,WebFetch"
+    "Read,Write,Edit,Bash,WebSearch,WebFetch,Skill"
   agent_spawn "$team" "architect" "기술스택 결정 및 시스템 아키텍처 전문가" \
-    "Read,Write,Edit,Bash,Glob,Grep"
+    "Read,Write,Edit,Bash,Glob,Grep,Skill"
 
   sleep 1
 
   # designer: Phase 2 대기 후 처리
   agent_spawn "$team" "designer"  "UI/UX 디자인 스펙 전문가" \
-    "Read,Write,Edit,Bash,Glob,Grep"
+    "Read,Write,Edit,Bash,Glob,Grep,Skill"
 
   # developer: Phase 3~4 핵심 에이전트 (2개 병렬)
   agent_spawn "$team" "dev1"      "풀스택 개발자 — 핵심 기능 담당" \
-    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch"
+    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch,Skill"
   agent_spawn "$team" "dev2"      "풀스택 개발자 — UI 컴포넌트 담당" \
-    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch"
+    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch,Skill"
 
   # qa + git: 마지막 단계
   agent_spawn "$team" "qa"        "QA 엔지니어 — 테스트 및 품질 보증" \
-    "Read,Write,Edit,Bash,Glob,Grep"
+    "Read,Write,Edit,Bash,Glob,Grep,Skill"
   agent_spawn "$team" "git"       "Git 관리자 — 커밋 및 PR 생성" \
     "Read,Write,Edit,Bash,Glob,Grep"
 
@@ -322,6 +355,129 @@ if [ "${1:-}" = "__resume__" ]; then
   # 5. 결과 요약
   step_summary "$TEAM_NAME"
   team_cleanup "$TEAM_NAME"
+  exit 0
+fi
+
+# ════════════════════════════════════════
+#  RERUN 모드 — 특정 태스크만 재실행
+# ════════════════════════════════════════
+if [ "${1:-}" = "__rerun__" ]; then
+  TEAM_NAME="${HANDLE_IT_RERUN_TEAM:?'HANDLE_IT_RERUN_TEAM 필요'}"
+  RERUN_TASK_ID="${HANDLE_IT_RERUN_TASK:?'HANDLE_IT_RERUN_TASK 필요'}"
+  TEAM_DIR="$TEAMS_ROOT/$TEAM_NAME"
+  PROJECT_DIR="$(cat "$TEAM_DIR/project_dir" 2>/dev/null || echo '/tmp/autodev_project')"
+  QUEUE="$TEAM_DIR/tasks/queue.json"
+
+  export AUTODEV_LOG_FILE="$HOME/.handle-it/logs/rerun_$(date +%Y%m%d_%H%M%S).log"
+  mkdir -p "$(dirname "$AUTODEV_LOG_FILE")"
+
+  # 태스크 존재 확인
+  TASK_EXISTS=$(jq -r --arg id "$RERUN_TASK_ID" '.tasks[] | select(.id == $id) | .id' "$QUEUE")
+  if [ -z "$TASK_EXISTS" ]; then
+    log_error_hint "태스크를 찾을 수 없음: $RERUN_TASK_ID" \
+      "handle-it status $TEAM_NAME 으로 태스크 ID를 확인하세요"
+    exit 1
+  fi
+
+  log_step "RERUN  태스크 재실행: $RERUN_TASK_ID (팀: $TEAM_NAME)"
+
+  # 1. 태스크 리셋
+  tq_reset "$QUEUE" "$RERUN_TASK_ID" "수동 재실행"
+  log_info "태스크 리셋: $RERUN_TASK_ID"
+
+  # 2. 태스크 데이터 읽기
+  TASK_DATA=$(tq_get "$QUEUE" "$RERUN_TASK_ID")
+  TASK_SUBJECT=$(echo "$TASK_DATA" | jq -r '.subject')
+  TASK_DESC=$(echo "$TASK_DATA" | jq -r '.description')
+
+  # 3. 직접 클레임
+  _lock "${QUEUE}.lock"
+  jq --arg id "$RERUN_TASK_ID" \
+     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     '(.tasks[] | select(.id == $id)) |=
+       (.owner = "rerun" | .status = "in_progress" | .started_at = $ts)' \
+     "$QUEUE" > "${QUEUE}.tmp" && _safe_jq_write "$QUEUE"
+  _unlock "${QUEUE}.lock"
+  log_info "태스크 클레임: $RERUN_TASK_ID [$TASK_SUBJECT]"
+
+  # 4. Claude 실행 (타임아웃 적용)
+  CLAUDE_PROMPT="당신은 AutoDev 팀의 전문 에이전트입니다.
+
+## 프로젝트 컨텍스트
+$(cat "$HOME/.handle-it/CLAUDE.md" 2>/dev/null || echo '컨텍스트 없음')
+
+## 현재 태스크 (재실행)
+- ID: $RERUN_TASK_ID
+- 제목: $TASK_SUBJECT
+- 설명: $TASK_DESC
+
+## 실행 규칙
+1. 태스크를 완전히 완료할 것
+2. 결과물은 반드시 $PROJECT_DIR 에 저장
+3. 완료 후 마지막 줄에 반드시 출력: TASK_RESULT: [완료 요약]"
+
+  RERUN_TIMEOUT="${AUTODEV_TASK_TIMEOUT:-300}"
+  RESULT_FILE=$(mktemp)
+  log_info "Claude 실행 중 (타임아웃: ${RERUN_TIMEOUT}초)..."
+
+  (
+    env -i \
+      HOME="$HOME" \
+      PATH="$PATH" \
+      TERM="${TERM:-xterm}" \
+      LANG="${LANG:-en_US.UTF-8}" \
+      ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+      CLAUDE_API_KEY="${CLAUDE_API_KEY:-}" \
+    $CLAUDE_BIN --print \
+      --allowedTools "Read,Write,Edit,Bash,Glob,Grep,Skill" \
+      --dangerously-skip-permissions \
+      -p "$CLAUDE_PROMPT" > "$RESULT_FILE" 2>&1
+  ) &
+  CLAUDE_PID=$!
+
+  ELAPSED_T=0
+  TIMED_OUT=false
+  while kill -0 $CLAUDE_PID 2>/dev/null; do
+    if [ $ELAPSED_T -ge $RERUN_TIMEOUT ]; then
+      kill $CLAUDE_PID 2>/dev/null || true
+      wait $CLAUDE_PID 2>/dev/null || true
+      TIMED_OUT=true
+      break
+    fi
+    sleep 2
+    ELAPSED_T=$((ELAPSED_T + 2))
+  done
+
+  if $TIMED_OUT; then
+    RESULT="태스크 타임아웃 (${RERUN_TIMEOUT}초 초과)"
+  else
+    EXIT_CODE=0
+    wait $CLAUDE_PID 2>/dev/null || EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+      RESULT=$(cat "$RESULT_FILE" 2>/dev/null)
+      [ -z "$RESULT" ] && RESULT="실행 실패 (exit: $EXIT_CODE)"
+    else
+      RESULT=$(cat "$RESULT_FILE")
+    fi
+  fi
+  rm -f "$RESULT_FILE"
+
+  # 5. 결과 처리
+  TASK_RESULT=$(echo "$RESULT" | grep '^TASK_RESULT:' | sed 's/TASK_RESULT: //' | tail -1)
+
+  if $TIMED_OUT; then
+    tq_fail "$QUEUE" "$RERUN_TASK_ID" "$RESULT"
+    log_error_hint "RERUN  태스크 타임아웃: $RERUN_TASK_ID" \
+      "AUTODEV_TASK_TIMEOUT 값을 늘려서 재시도하세요"
+  elif [ -z "$TASK_RESULT" ]; then
+    tq_fail "$QUEUE" "$RERUN_TASK_ID" "TASK_RESULT 미출력"
+    log_error_hint "RERUN  태스크 실패 (결과 미출력): $RERUN_TASK_ID" \
+      "handle-it logs $TEAM_NAME 으로 상세 로그를 확인하세요"
+  else
+    tq_complete "$QUEUE" "$RERUN_TASK_ID" "$TASK_RESULT"
+    log_success "RERUN  태스크 완료: $RERUN_TASK_ID → $TASK_RESULT"
+  fi
+
   exit 0
 fi
 

@@ -4,10 +4,30 @@ PRD를 분석해서 디자인 스펙을 정의하세요.
 ## 입력
 PRD: {{PROJECT_DIR}}/prd.md
 
-## 활용 스킬
-- **ui-ux-pro-max**: 프리미엄 UI/UX 설계 — glassmorphism, minimalism, 다크모드, 반응형 디자인 패턴 적용. SaaS/대시보드/모바일 앱 특화.
-- **ui-design-patterns**: 공통 인터페이스 패턴 — 네비게이션(탭/사이드바/브레드크럼), 폼(밸리데이션/멀티스텝), 데이터 표시(테이블/카드/리스트), 피드백(토스트/모달/스켈레톤), 접근성(WCAG 2.1 AA).
-- **tailwind-design-system**: Tailwind CSS v4 디자인 시스템 — 디자인 토큰, 컴포넌트 라이브러리, 반응형 패턴. CSS 변수 기반 토큰으로 테마 전환 지원.
+## 활용 스킬 (Skill 도구로 호출)
+아래 스킬은 Skill 도구를 사용해 직접 호출하세요. 디자인 품질이 크게 향상됩니다.
+
+- **`/ui-ux-pro-max`**: 디자인 스펙 작성 전 호출. glassmorphism, minimalism, 다크모드, 반응형 패턴 등 프리미엄 UI/UX 설계 가이드.
+  → 호출: `Skill(skill: "ui-ux-pro-max")`
+- **`/ui-design-system`**: 디자인 시스템 구축 시 호출. 색상, 타이포그래피, 간격 시스템 등 체계적 디자인 토큰 정의. ⭐ 2K installs
+  → 호출: `Skill(skill: "ui-design-system")`
+- **`/ui-ux-designer`**: UI/UX 설계 전반에 활용. 디자인 원칙, 사용자 리서치, 인터랙션 패턴, 접근성(WCAG), 반응형, shadcn/ui 가이드. ⭐ 898 installs
+  → 호출: `Skill(skill: "ui-ux-designer")`
+- **`/ui-design-patterns`**: 컴포넌트 설계 시 호출. 네비게이션, 폼, 데이터 표시, 피드백, 접근성(WCAG 2.1 AA) 패턴.
+  → 호출: `Skill(skill: "ui-design-patterns")`
+- **`/tailwind-best-practices`**: Tailwind CSS 베스트 프랙티스 참고. ⭐ 21.9K stars (mastra-ai)
+  → 호출: `Skill(skill: "tailwind-best-practices")`
+- **`/tailwind-design-system`**: Tailwind CSS v4 디자인 시스템, CSS 변수 기반 토큰.
+  → 호출: `Skill(skill: "tailwind-design-system")`
+- **`/shadcn-ui`**: shadcn/ui 컴포넌트 패턴. Radix UI + Tailwind 기반. ⭐ 601 stars
+  → 호출: `Skill(skill: "shadcn-ui")`
+
+### 스킬 활용 순서
+1. `/ui-ux-pro-max` + `/ui-ux-designer` 호출 → 전체 디자인 방향 수립
+2. `/ui-design-system` + `/ui-design-patterns` 호출 → 디자인 토큰 + 컴포넌트 패턴
+3. `/tailwind-best-practices` + `/tailwind-design-system` 호출 → Tailwind 체계 정의
+4. `/shadcn-ui` 호출 → 컴포넌트 라이브러리 패턴
+5. design_spec.json 저장
 
 ## 디자인 원칙
 - 다크 프리미엄 톤 기본, glassmorphism 요소 적절히 활용

@@ -135,6 +135,8 @@ handle-it "아이디어"              # 메인 실행
 handle-it "아이디어" ~/my-project # 출력 경로 지정
 handle-it init                    # 프로젝트 루트에 handle-it.config.json 생성
 handle-it status                  # 진행 중인 팀 상태 확인
+handle-it rerun <태스크ID> [팀ID] # 특정 태스크만 재실행
+handle-it logs [팀ID] [필터]      # 에이전트 로그 조회
 handle-it --version
 ```
 
@@ -190,6 +192,12 @@ git push --tags
 - [x] **실시간 모니터링 대시보드** — TUI (`handle-it watch`) + 웹 (`handle-it dashboard`)
 - [x] **`handle-it resume [팀ID]`** — 세션 끊김 복구 (in_progress → pending 리셋, 에이전트 재스폰)
 - [x] README 업데이트 (handle-it 명칭으로)
+- [x] **코드 품질 강화** — `set -euo pipefail` 전역 적용, ShellCheck CI, config 스키마 검증
+- [x] **안정성 개선** — jq 출력 검증(`_safe_jq_write`), DAG 순환 감지(`tq_validate_dag`), heartbeat 기반 에이전트 감시
+- [x] **보안 강화** — 입력 검증(경로 traversal 방지), sed 이스케이프, `env -i` 환경변수 격리
+- [x] **Claude 호출 타임아웃** — `AUTODEV_TASK_TIMEOUT` (기본 300초), `TASK_RESULT` 미출력 시 실패 처리
+- [x] **UX 개선** — `handle-it rerun <태스크ID>` (특정 태스크 재실행), `handle-it logs` (로그 조회), 구조화된 에러 메시지(`log_error_hint`)
+- [x] **테스트 스위트** — bats 기반 38개 단위 테스트 (task_queue, messenger, _safe_jq_write, tq_validate_dag)
 - [ ] npm 배포 (npm login → npm publish)
 
 ---

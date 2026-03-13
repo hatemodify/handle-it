@@ -1,0 +1,39 @@
+name: Lint & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck -x -s bash \
+            scripts/autodev.sh \
+            scripts/watch.sh \
+            scripts/dashboard.sh \
+            scripts/install.sh \
+            scripts/lib/logger.sh \
+            scripts/lib/task_queue.sh \
+            scripts/lib/messenger.sh \
+            scripts/lib/team_manager.sh
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats
+        run: sudo apt-get install -y bats
+
+      - name: Run tests
+        run: bats tests/
