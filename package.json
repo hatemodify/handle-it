@@ -1,6 +1,6 @@
 {
   "name": "@hatemodify/handle-it",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AI-powered autonomous development pipeline — 아이디어 한 줄 → 코드 + PR 자동 완성",
   "type": "module",
   "bin": {
@@ -20,7 +20,12 @@
     "prepare": "node -e \"const fs=require('fs'); ['scripts/autodev.sh','scripts/install.sh',...fs.readdirSync('scripts/lib').map(f=>'scripts/lib/'+f)].filter(f=>f.endsWith('.sh')).forEach(f=>{try{fs.chmodSync(f,'755')}catch(e){}});\""
   },
   "keywords": [
-    "ai", "claude", "autonomous", "development", "agents", "autodev"
+    "ai",
+    "claude",
+    "autonomous",
+    "development",
+    "agents",
+    "autodev"
   ],
   "author": "J",
   "license": "MIT",
