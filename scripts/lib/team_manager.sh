@@ -99,21 +99,21 @@ log_agent "$agent_name" "시작"
 
 # ── 메인 루프 ──
 while true; do
-  # 1. inbox 확인
-  MESSAGES=\$(msg_read "\$INBOX_DIR" "$agent_name")
-  MSG_COUNT=\$(echo "\$MESSAGES" | jq 'length')
+  # 1. inbox 확인 (파일 경합 시 빈 배열로 처리)
+  MESSAGES=\$(msg_read "\$INBOX_DIR" "$agent_name" 2>/dev/null || echo '[]')
+  MSG_COUNT=\$(echo "\$MESSAGES" | jq 'length' 2>/dev/null || echo 0)
   if [ "\$MSG_COUNT" -gt 0 ]; then
     log_agent "$agent_name" "수신 메시지 \${MSG_COUNT}건"
     # 종료 메시지 확인
-    SHUTDOWN=\$(echo "\$MESSAGES" | jq -r '.[] | select(.type=="shutdown") | .content' | head -1)
+    SHUTDOWN=\$(echo "\$MESSAGES" | jq -r '.[] | select(.type=="shutdown") | .content' 2>/dev/null | head -1 || true)
     if [ -n "\$SHUTDOWN" ]; then
       log_agent "$agent_name" "종료 신호 수신, 종료"
       break
     fi
   fi
 
-  # 2. 태스크 클레임 시도
-  TASK_ID=\$(tq_claim "\$QUEUE_FILE" "$agent_name")
+  # 2. 태스크 클레임 시도 (경합 시 none 반환)
+  TASK_ID=\$(tq_claim "\$QUEUE_FILE" "$agent_name" 2>/dev/null || echo "none")
 
   if [ "\$TASK_ID" = "none" ]; then
     # 큐 전체 완료 확인
@@ -165,18 +165,11 @@ while true; do
 PROMPT_EOF
   )
 
-  # Claude 실행 (타임아웃 + 환경변수 격리)
+  # Claude 실행 (타임아웃 + CLAUDECODE 환경변수만 해제)
   CLAUDE_TASK_TIMEOUT="\${AUTODEV_TASK_TIMEOUT:-300}"
   RESULT_FILE=\$(mktemp)
   (
-    env -i \\
-      HOME="\$HOME" \\
-      PATH="\$PATH" \\
-      TERM="\${TERM:-xterm}" \\
-      LANG="\${LANG:-en_US.UTF-8}" \\
-      ANTHROPIC_API_KEY="\${ANTHROPIC_API_KEY:-}" \\
-      CLAUDE_API_KEY="\${CLAUDE_API_KEY:-}" \\
-      AUTODEV_TASK_TIMEOUT="\$CLAUDE_TASK_TIMEOUT" \\
+    unset CLAUDECODE 2>/dev/null || true
     \$CLAUDE_BIN --print \\
       --allowedTools "$allowed_tools" \\
       --dangerously-skip-permissions \\
@@ -213,7 +206,7 @@ PROMPT_EOF
   rm -f "\$RESULT_FILE"
 
   # 5. 결과 파싱 + 태스크 완료
-  TASK_RESULT=\$(echo "\$RESULT" | grep '^TASK_RESULT:' | sed 's/TASK_RESULT: //' | tail -1)
+  TASK_RESULT=\$(echo "\$RESULT" | { grep '^TASK_RESULT:' || true; } | sed 's/TASK_RESULT: //' | tail -1)
 
   # TASK_RESULT 미출력 시 실패 처리 (타임아웃 포함)
   if \$TIMED_OUT; then
@@ -462,12 +455,12 @@ agent_respawn() {
 # ═══════════════════════════════════════
 _lead_health_check() {
   local team_name="$1"
-  local max_respawns="${2:-3}"
+  local max_respawns="${2:-5}"
   local team_dir="$TEAMS_ROOT/$team_name"
   local config="$team_dir/config.json"
 
   local agents
-  agents=$(jq -r '.agents[] | select(.status == "running") | .name' "$config")
+  agents=$(jq -r '.agents[] | select(.status == "running") | .name' "$config" 2>/dev/null) || return 0
 
   for agent_name in $agents; do
     local pid_file="$team_dir/agents/${agent_name}.pid"
@@ -502,7 +495,7 @@ _lead_health_check() {
 
       local respawns
       respawns=$(jq -r --arg name "$agent_name" \
-        '.agents[] | select(.name == $name) | .respawn_count // 0' "$config")
+        '.agents[] | select(.name == $name) | .respawn_count // 0' "$config" 2>/dev/null) || respawns=0
 
       if [ "$respawns" -ge "$max_respawns" ]; then
         log_error "LEAD  $agent_name 최대 리스폰 초과 ($max_respawns)"
@@ -576,19 +569,20 @@ lead_loop() {
 
   while true; do
     # 헬스체크 + 타임아웃 감지 + 인박스 (매 health_interval초)
+    # || true 가드: 공유 파일(queue.json, config.json) 동시 접근 시 jq 실패해도 리드 유지
     if [ $((elapsed % health_interval)) -eq 0 ] && [ "$elapsed" -gt 0 ]; then
-      _lead_health_check "$team_name" 3
-      _lead_check_stale_tasks "$team_name" "$task_timeout"
-      _lead_read_inbox "$team_name"
+      _lead_health_check "$team_name" 5 || true
+      _lead_check_stale_tasks "$team_name" "$task_timeout" || true
+      _lead_read_inbox "$team_name" || true
     fi
 
-    # 진행률 표시
+    # 진행률 표시 (파일 경합 시 이전 값 유지)
     local stats total completed failed in_progress
-    stats=$(tq_stats "$queue")
-    total=$(echo "$stats" | jq '.total')
-    completed=$(echo "$stats" | jq '.completed')
-    failed=$(echo "$stats" | jq '.failed')
-    in_progress=$(echo "$stats" | jq '.in_progress')
+    stats=$(tq_stats "$queue" 2>/dev/null) || continue
+    total=$(echo "$stats" | jq '.total' 2>/dev/null) || continue
+    completed=$(echo "$stats" | jq '.completed' 2>/dev/null) || continue
+    failed=$(echo "$stats" | jq '.failed' 2>/dev/null) || continue
+    in_progress=$(echo "$stats" | jq '.in_progress' 2>/dev/null) || continue
 
     local progress=0
     [ "$total" -gt 0 ] && progress=$(( completed * 20 / total ))

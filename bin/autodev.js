@@ -62,8 +62,9 @@ if (!command || command === '--help' || command === '-h') {
     handle-it resume [팀ID]            중단된 팀 복구 재실행
     handle-it rerun <태스크ID> [팀ID]  특정 태스크만 재실행
     handle-it logs [팀ID] [필터]       에이전트 로그 조회
+    handle-it ui [포트]                웹 UI (기본 포트: 3847)
     handle-it watch [팀ID]             실시간 모니터링 TUI
-    handle-it dashboard [팀ID] [포트]  웹 대시보드 (기본 포트: 3847)
+    handle-it dashboard [팀ID] [포트]  웹 대시보드 (기본 포트: 3847, legacy)
     handle-it --version                버전 확인
 
   \x1b[1m예시:\x1b[0m
@@ -286,6 +287,36 @@ if (command === 'resume') {
     });
     child.on('exit', code => process.exit(code ?? 0));
   });
+}
+
+// ─────────────────────────────────────
+//  handle-it ui [포트]
+// ─────────────────────────────────────
+if (command === 'ui') {
+  const port = args[1] || '3847';
+  const serverPath = join(PKG_ROOT, 'web', 'server.js');
+
+  if (!existsSync(serverPath)) {
+    console.error(`\x1b[31m✗\x1b[0m  web/server.js 없음: ${serverPath}`);
+    process.exit(1);
+  }
+
+  const env = {
+    ...process.env,
+    HANDLE_IT_UI_PORT: port,
+    HANDLE_IT_TEAMS_ROOT: process.env.HANDLE_IT_TEAMS_ROOT
+      || process.env.AUTODEV_TEAMS_ROOT
+      || join(process.env.HOME, '.handle-it', 'teams'),
+  };
+
+  const child = spawn(process.execPath, [serverPath], {
+    env,
+    stdio: 'inherit',
+    cwd: process.cwd(),
+  });
+
+  child.on('exit', code => process.exit(code ?? 0));
+  await new Promise(() => {});
 }
 
 // ─────────────────────────────────────

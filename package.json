@@ -10,7 +10,8 @@
   "files": [
     "bin/",
     "scripts/",
-    "prompts/"
+    "prompts/",
+    "web/"
   ],
   "engines": {
     "node": ">=18"

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>handle-it</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-title">
+        <span>handle-it</span> Web UI
+      </div>
+      <div class="header-actions">
+        <div class="connection-status" id="connection-status">
+          <div class="connection-dot" id="connection-dot"></div>
+          <span id="connection-text">Connecting...</span>
+        </div>
+        <button class="btn btn-primary" id="btn-new-pipeline" onclick="app.showNewPipelineModal()">
+          + New Pipeline
+        </button>
+      </div>
+    </header>
+
+    <!-- Sidebar -->
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-label">Teams</div>
+        <div id="team-list">
+          <div class="empty-state" style="padding: 16px;">
+            <div class="empty-state-text" style="font-size: 12px;">Loading...</div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main" id="main-content">
+      <div class="empty-state">
+        <div class="empty-state-icon">&#9881;</div>
+        <div class="empty-state-text">Select a team or start a new pipeline</div>
+        <button class="btn btn-primary" onclick="app.showNewPipelineModal()">
+          + New Pipeline
+        </button>
+      </div>
+    </main>
+  </div>
+
+  <!-- New Pipeline Modal -->
+  <div class="modal-overlay" id="modal-new-pipeline" style="display: none;">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">New Pipeline</div>
+        <button class="modal-close" onclick="app.hideNewPipelineModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="input-idea">Idea</label>
+          <textarea class="form-textarea" id="input-idea" placeholder="AI diary app with sentiment analysis and dark mode..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="input-project-dir">Project Directory (optional)</label>
+          <input class="form-input" id="input-project-dir" type="text" placeholder="~/projects/my-app">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="app.hideNewPipelineModal()">Cancel</button>
+        <button class="btn btn-primary" id="btn-start" onclick="app.startPipeline()">Start</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
