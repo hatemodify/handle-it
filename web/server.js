@@ -316,7 +316,7 @@ function startPipeline(idea, projectDir) {
       AUTODEV_TEAMS_ROOT: TEAMS_ROOT,
       AUTODEV_TIMEOUT: String(config.timeout || 7200),
       AUTODEV_HEALTH_INTERVAL: String(config.health_interval || 5),
-      AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 300),
+      AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 600),
       CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
       AUTODEV_AGENTS: (config.agents || []).join(','),
     };
@@ -387,7 +387,7 @@ function resumePipeline(teamId) {
     AUTODEV_TEAMS_ROOT: TEAMS_ROOT,
     AUTODEV_TIMEOUT: String(config.timeout || 7200),
     AUTODEV_HEALTH_INTERVAL: String(config.health_interval || 5),
-    AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 300),
+    AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 600),
     CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
     HANDLE_IT_RESUME_TEAM: teamId,
   };
@@ -416,7 +416,7 @@ function rerunTask(teamId, taskId) {
       : PROMPTS_DIR,
     AUTODEV_TEAMS_ROOT: TEAMS_ROOT,
     AUTODEV_TIMEOUT: String(config.timeout || 7200),
-    AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 300),
+    AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 600),
     CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
     HANDLE_IT_RERUN_TEAM: teamId,
     HANDLE_IT_RERUN_TASK: taskId,

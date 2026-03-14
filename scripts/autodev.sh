@@ -264,7 +264,7 @@ step_wait() {
   # 리드 오케스트레이터 루프 (헬스체크 + 진행률 + 타임아웃 감지)
   local timeout="${AUTODEV_TIMEOUT:-7200}"
   local health_interval="${AUTODEV_HEALTH_INTERVAL:-5}"
-  local task_timeout="${AUTODEV_TASK_TIMEOUT:-300}"
+  local task_timeout="${AUTODEV_TASK_TIMEOUT:-600}"
   lead_loop "$team" "$timeout" "$health_interval" "$task_timeout"
 }
 
@@ -350,7 +350,7 @@ if [ "${1:-}" = "__resume__" ]; then
   log_step "RESUME  리드 에이전트 재시작"
   timeout="${AUTODEV_TIMEOUT:-7200}"
   health_interval="${AUTODEV_HEALTH_INTERVAL:-5}"
-  task_timeout="${AUTODEV_TASK_TIMEOUT:-300}"
+  task_timeout="${AUTODEV_TASK_TIMEOUT:-600}"
   lead_loop "$TEAM_NAME" "$timeout" "$health_interval" "$task_timeout"
 
   # 5. 결과 요약
@@ -418,7 +418,7 @@ $(cat "$HOME/.handle-it/CLAUDE.md" 2>/dev/null || echo '컨텍스트 없음')
 2. 결과물은 반드시 $PROJECT_DIR 에 저장
 3. 완료 후 마지막 줄에 반드시 출력: TASK_RESULT: [완료 요약]"
 
-  RERUN_TIMEOUT="${AUTODEV_TASK_TIMEOUT:-300}"
+  RERUN_TIMEOUT="${AUTODEV_TASK_TIMEOUT:-600}"
   RESULT_FILE=$(mktemp)
   log_info "Claude 실행 중 (타임아웃: ${RERUN_TIMEOUT}초)..."
 

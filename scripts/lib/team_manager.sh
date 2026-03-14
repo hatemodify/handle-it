@@ -166,7 +166,7 @@ PROMPT_EOF
   )
 
   # Claude 실행 (타임아웃 + CLAUDECODE 환경변수만 해제)
-  CLAUDE_TASK_TIMEOUT="\${AUTODEV_TASK_TIMEOUT:-300}"
+  CLAUDE_TASK_TIMEOUT="\${AUTODEV_TASK_TIMEOUT:-600}"
   RESULT_FILE=\$(mktemp)
   (
     unset CLAUDECODE 2>/dev/null || true
