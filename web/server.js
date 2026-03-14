@@ -3,7 +3,7 @@
 //  API + SSE + Static Files (zero dependencies)
 // ═══════════════════════════════════════════════════
 import { createServer } from 'node:http';
-import { readFileSync, readdirSync, statSync, existsSync, watch, readFile } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, watch, readFile } from 'node:fs';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -356,16 +356,27 @@ function stopPipeline(teamId) {
   if (child) {
     child.kill('SIGTERM');
     runningPipelines.delete(teamId);
-    return true;
   }
 
-  // Try to kill agents from config
+  // Kill agents from config
   const configFile = join(TEAMS_ROOT, teamId, 'config.json');
   const config = readJsonSafe(configFile);
   if (config?.agents) {
     config.agents.forEach(a => {
       try { process.kill(a.pid, 'SIGTERM'); } catch {}
     });
+  }
+
+  // Update config.json status to stopped
+  if (config) {
+    config.status = 'stopped';
+    config.stopped_at = new Date().toISOString();
+    if (config.agents) {
+      config.agents.forEach(a => { a.status = 'stopped'; });
+    }
+    try {
+      writeFileSync(configFile, JSON.stringify(config, null, 2));
+    } catch {}
     return true;
   }
   return false;

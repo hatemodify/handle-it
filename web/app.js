@@ -650,7 +650,17 @@ const app = (() => {
   async function stopPipeline(teamId) {
     if (!confirm('Stop this pipeline? Running agents will be terminated.')) return;
     await api(`/pipeline/${teamId}/stop`, { method: 'POST' });
-    setTimeout(() => loadTeamDetail(teamId).then(() => renderTeamView()), 1000);
+    // Immediately update local state so UI reflects the change
+    if (teamDetail) {
+      teamDetail.status = 'stopped';
+      teamDetail.agents.forEach(a => { a.alive = false; a.status = 'stopped'; });
+      renderTeamView();
+    }
+    await loadTeams();
+    setTimeout(async () => {
+      await loadTeamDetail(teamId);
+      renderTeamView();
+    }, 1000);
   }
 
   async function resumePipeline(teamId) {
