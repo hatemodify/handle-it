@@ -55,8 +55,8 @@ if (!command || command === '--help' || command === '-h') {
   AI-powered autonomous development pipeline
 
   \x1b[1m사용법:\x1b[0m
-    handle-it "<아이디어>"              프로젝트 자동 생성
-    handle-it "<아이디어>" [경로]       출력 경로 지정
+    handle-it "<아이디어>"              새 프로젝트 자동 생성
+    handle-it "<아이디어>" [경로]       출력 경로 지정 (기존 경로 = 수정 모드)
     handle-it init                     현재 폴더에 handle-it.config.json 생성
     handle-it status [팀ID]            진행 중인 팀 상태 확인
     handle-it resume [팀ID]            중단된 팀 복구 재실행
@@ -93,9 +93,10 @@ if (command === 'init') {
     agents: ["planner", "architect", "designer", "dev1", "dev2", "qa", "git"],
     timeout: 7200,
     claude_bin: "claude",
+    model: null,
     project_dir: null,
     prompts_dir: null,
-    _comment: "prompts_dir: 커스텀 프롬프트 경로 (null=패키지 기본값)"
+    _comment: "model: Claude 모델 (예: claude-sonnet-4-20250514). prompts_dir: 커스텀 프롬프트 경로 (null=기본값)"
   };
 
   writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
@@ -222,6 +223,11 @@ let config = {};
       errors.push('prompts_dir는 문자열이어야 합니다');
     }
   }
+  if (config.model !== undefined && config.model !== null) {
+    if (typeof config.model !== 'string') {
+      errors.push('model은 문자열이어야 합니다');
+    }
+  }
 
   if (errors.length > 0) {
     console.error(`\x1b[31m✗\x1b[0m  config 검증 실패:`);
@@ -271,6 +277,7 @@ if (command === 'resume') {
     AUTODEV_HEALTH_INTERVAL: String(config.health_interval || 5),
     AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 900),
     CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
+    AUTODEV_MODEL: config.model || process.env.AUTODEV_MODEL || '',
     HANDLE_IT_RESUME_TEAM: targetTeam,
   };
 
@@ -446,6 +453,7 @@ if (command === 'rerun') {
     AUTODEV_TIMEOUT: String(config.timeout || 7200),
     AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 900),
     CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
+    AUTODEV_MODEL: config.model || process.env.AUTODEV_MODEL || '',
     HANDLE_IT_RERUN_TEAM: targetTeam,
     HANDLE_IT_RERUN_TASK: taskId,
   };
@@ -536,7 +544,8 @@ const env = {
   CLAUDE_BIN:        config.claude_bin  || process.env.CLAUDE_BIN  || 'claude',
   AUTODEV_TIMEOUT:   String(config.timeout || 7200),
   AUTODEV_HEALTH_INTERVAL: String(config.health_interval || 5),
-  AUTODEV_TASK_TIMEOUT:    String(config.task_timeout || 300),
+  AUTODEV_TASK_TIMEOUT:    String(config.task_timeout || 900),
+  AUTODEV_MODEL:     config.model || process.env.AUTODEV_MODEL || '',
   AUTODEV_AGENTS:    (config.agents || []).join(','),
 };
 

@@ -86,12 +86,87 @@ print_banner() {
 step_init() {
   log_step "STEP 1/5  초기화"
 
+  # 기존 프로젝트 감지
+  MODIFY_MODE=false
+  EXISTING_FILES=""
+  if [ -d "$PROJECT_DIR" ]; then
+    local file_count
+    file_count=$(find "$PROJECT_DIR" -type f \
+      ! -path "*/node_modules/*" ! -path "*/.git/*" \
+      ! -path "*/.next/*" ! -path "*/dist/*" \
+      2>/dev/null | head -20 | wc -l | tr -d ' ')
+    if [ "$file_count" -gt 0 ]; then
+      MODIFY_MODE=true
+      EXISTING_FILES=$(find "$PROJECT_DIR" -type f \
+        ! -path "*/node_modules/*" ! -path "*/.git/*" \
+        ! -path "*/.next/*" ! -path "*/dist/*" \
+        2>/dev/null | head -50 | sed "s|^$PROJECT_DIR/||" | sort)
+      log_info "기존 프로젝트 감지 (${file_count}개 파일) → 수정 모드"
+    fi
+  fi
+  export MODIFY_MODE
+
   # 프로젝트 디렉토리 생성
   mkdir -p "$PROJECT_DIR"
 
   # CLAUDE.md — 모든 에이전트가 공유하는 컨텍스트
   mkdir -p "$HOME/.handle-it"
-  cat > "$HOME/.handle-it/CLAUDE.md" <<EOF
+
+  if $MODIFY_MODE; then
+    # 기존 프로젝트 수정 모드
+    local existing_claude_md=""
+    if [ -f "$PROJECT_DIR/CLAUDE.md" ]; then
+      existing_claude_md=$(cat "$PROJECT_DIR/CLAUDE.md")
+    fi
+    local existing_readme=""
+    if [ -f "$PROJECT_DIR/README.md" ]; then
+      existing_readme=$(head -30 "$PROJECT_DIR/README.md")
+    fi
+    local existing_pkg=""
+    if [ -f "$PROJECT_DIR/package.json" ]; then
+      existing_pkg=$(cat "$PROJECT_DIR/package.json")
+    fi
+    cat > "$HOME/.handle-it/CLAUDE.md" <<EOF
+# AutoDev 프로젝트 컨텍스트 (수정 모드)
+
+## 모드
+**기존 프로젝트 수정** — 새로 만드는 것이 아니라 기존 코드베이스를 수정합니다.
+
+## 수정 요청
+$IDEA
+
+## 프로젝트 경로
+$PROJECT_DIR
+
+## 팀 이름
+$TEAM_NAME
+
+## 기존 프로젝트 구조
+\`\`\`
+$EXISTING_FILES
+\`\`\`
+
+$([ -n "$existing_pkg" ] && echo "## 기존 package.json
+\`\`\`json
+$existing_pkg
+\`\`\`")
+
+$([ -n "$existing_claude_md" ] && echo "## 기존 CLAUDE.md
+$existing_claude_md")
+
+$([ -n "$existing_readme" ] && echo "## 기존 README.md (상위 30줄)
+$existing_readme")
+
+## 수정 규칙
+- 기존 코드 스타일과 패턴을 따를 것
+- 기존 의존성/프레임워크를 유지하고 필요한 것만 추가할 것
+- 불필요한 파일 삭제나 대규모 리팩토링 금지
+- 기존 테스트가 있으면 깨뜨리지 않을 것
+- 변경사항은 최소화하되 요청사항은 완전히 구현할 것
+EOF
+  else
+    # 새 프로젝트 생성 모드
+    cat > "$HOME/.handle-it/CLAUDE.md" <<EOF
 # AutoDev 프로젝트 컨텍스트
 
 ## 아이디어
@@ -116,6 +191,7 @@ $TIMESTAMP
 - 훅: use 접두사
 - 파일명: kebab-case
 EOF
+  fi
 
   # 팀 생성
   TEAM_DIR=$(team_create "$TEAM_NAME")
@@ -134,68 +210,115 @@ step_register_tasks() {
 
   log_step "STEP 2/5  태스크 등록"
 
-  # ── Phase 1: 병렬 가능 (의존성 없음) ──
-  T_PRD=$(tq_add "$queue" \
-    "PRD 작성" \
-    "$(sed "s|{{IDEA}}|$IDEA_ESCAPED|g; s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
-      "$AUTODEV_PROMPTS/planner.md")")
+  if $MODIFY_MODE; then
+    # ── 수정 모드: 기존 프로젝트 분석 → 변경 계획 → 구현 → QA → Git ──
 
-  T_STACK=$(tq_add "$queue" \
-    "기술스택 결정" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
-      "$AUTODEV_PROMPTS/architect.md")")
+    # Phase 1: 기존 코드 분석 + 변경 계획
+    T_ANALYSIS=$(tq_add "$queue" \
+      "기존 코드 분석" \
+      "$PROJECT_DIR 의 기존 코드를 분석하고 구조, 사용된 기술스택, 패턴을 analysis.json으로 정리. 수정 요청: $IDEA" \
+      "" "architect")
 
-  # ── Phase 2: PRD 완료 후 ──
-  T_DESIGN=$(tq_add "$queue" \
-    "디자인 스펙 생성" \
-    "PRD($PROJECT_DIR/prd.md)를 읽고 UI 컴포넌트 목록, 색상 팔레트, 타이포그래피를 design_spec.json으로 저장. 다크 프리미엄 톤 기본값." \
-    "$T_PRD")
+    T_PLAN=$(tq_add "$queue" \
+      "변경 계획 수립" \
+      "수정 요청($IDEA)을 분석하고 구체적인 변경 계획을 change_plan.md로 작성. 변경할 파일 목록, 추가할 의존성, 영향 범위 분석 포함. 프로젝트: $PROJECT_DIR" \
+      "$T_ANALYSIS" "planner")
 
-  T_TASKS=$(tq_add "$queue" \
-    "개발 태스크 분해" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
-      "$AUTODEV_PROMPTS/architect.md") — 태스크 분해 단계만 실행" \
-    "$T_PRD,$T_STACK")
+    # Phase 2: 구현 (병렬)
+    T_IMPL1=$(tq_add "$queue" \
+      "핵심 변경 구현" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|change_plan.md의 핵심 변경사항 구현. 기존 코드 스타일 유지. 수정 요청: $IDEA|g" \
+        "$AUTODEV_PROMPTS/developer.md")" \
+      "$T_PLAN" "dev1")
 
-  # ── Phase 3: 태스크 분해 완료 후 ──
-  T_SETUP=$(tq_add "$queue" \
-    "프로젝트 초기 세팅" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 기술스택으로 프로젝트 초기화. package.json, tsconfig, eslint, tailwind 설정|g" \
-      "$AUTODEV_PROMPTS/developer.md")" \
-    "$T_TASKS")
+    T_IMPL2=$(tq_add "$queue" \
+      "UI/스타일 변경" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|change_plan.md의 UI 관련 변경사항 구현. 기존 디자인 시스템 유지. 수정 요청: $IDEA|g" \
+        "$AUTODEV_PROMPTS/developer.md")" \
+      "$T_PLAN" "dev2")
 
-  T_AUTH=$(tq_add "$queue" \
-    "인증 시스템 구현" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 auth 스택으로 로그인/회원가입 구현. 소셜 로그인 포함|g" \
-      "$AUTODEV_PROMPTS/developer.md")" \
-    "$T_SETUP")
+    # Phase 3: QA + Git
+    T_QA=$(tq_add "$queue" \
+      "변경사항 검증" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
+        "$AUTODEV_PROMPTS/qa.md") — 기존 테스트가 깨지지 않았는지 확인. 새 변경사항에 대한 테스트 추가." \
+      "$T_IMPL1,$T_IMPL2" "qa")
 
-  T_CORE=$(tq_add "$queue" \
-    "핵심 기능 구현" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|prd.md의 P0 기능 구현. 각 기능은 독립 컴포넌트로 분리|g" \
-      "$AUTODEV_PROMPTS/developer.md")" \
-    "$T_AUTH")
+    tq_add "$queue" \
+      "Git 커밋" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
+        "$AUTODEV_PROMPTS/git.md") — 변경사항만 커밋. 수정 요청: $IDEA" \
+      "$T_QA" "git" > /dev/null
 
-  T_UI=$(tq_add "$queue" \
-    "UI 컴포넌트 구현" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|design_spec.json 기반 공통 UI 컴포넌트 구현. Button, Card, Input, Modal, Navigation|g" \
-      "$AUTODEV_PROMPTS/developer.md")" \
-    "$T_DESIGN,$T_SETUP")
+    log_success "태스크 등록 완료 (수정 모드, 총 6개)"
+  else
+    # ── 신규 모드: 기존 9개 태스크 ──
 
-  # ── Phase 4: 코드 완성 후 ──
-  T_QA=$(tq_add "$queue" \
-    "QA 및 자동 수정" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
-      "$AUTODEV_PROMPTS/qa.md")" \
-    "$T_CORE,$T_UI")
+    # ── Phase 1: 병렬 가능 (의존성 없음) ──
+    T_PRD=$(tq_add "$queue" \
+      "PRD 작성" \
+      "$(sed "s|{{IDEA}}|$IDEA_ESCAPED|g; s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
+        "$AUTODEV_PROMPTS/planner.md")" \
+      "" "planner")
 
-  tq_add "$queue" \
-    "Git 커밋 및 PR 생성" \
-    "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
-      "$AUTODEV_PROMPTS/git.md")" \
-    "$T_QA" > /dev/null
+    T_STACK=$(tq_add "$queue" \
+      "기술스택 결정" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
+        "$AUTODEV_PROMPTS/architect.md")" \
+      "" "architect")
 
-  log_success "태스크 등록 완료 (총 9개)"
+    # ── Phase 2: PRD 완료 후 ──
+    T_DESIGN=$(tq_add "$queue" \
+      "디자인 스펙 생성" \
+      "PRD($PROJECT_DIR/prd.md)를 읽고 UI 컴포넌트 목록, 색상 팔레트, 타이포그래피를 design_spec.json으로 저장. 다크 프리미엄 톤 기본값." \
+      "$T_PRD" "designer")
+
+    T_TASKS=$(tq_add "$queue" \
+      "개발 태스크 분해" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
+        "$AUTODEV_PROMPTS/architect.md") — 태스크 분해 단계만 실행" \
+      "$T_PRD,$T_STACK" "architect")
+
+    # ── Phase 3: 태스크 분해 완료 후 ──
+    T_SETUP=$(tq_add "$queue" \
+      "프로젝트 초기 세팅" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 기술스택으로 프로젝트 초기화. package.json, tsconfig, eslint, tailwind 설정|g" \
+        "$AUTODEV_PROMPTS/developer.md")" \
+      "$T_TASKS" "dev1")
+
+    T_AUTH=$(tq_add "$queue" \
+      "인증 시스템 구현" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 auth 스택으로 로그인/회원가입 구현. 소셜 로그인 포함|g" \
+        "$AUTODEV_PROMPTS/developer.md")" \
+      "$T_SETUP" "dev1")
+
+    T_CORE=$(tq_add "$queue" \
+      "핵심 기능 구현" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|prd.md의 P0 기능 구현. 각 기능은 독립 컴포넌트로 분리|g" \
+        "$AUTODEV_PROMPTS/developer.md")" \
+      "$T_AUTH" "dev1")
+
+    T_UI=$(tq_add "$queue" \
+      "UI 컴포넌트 구현" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|design_spec.json 기반 공통 UI 컴포넌트 구현. Button, Card, Input, Modal, Navigation|g" \
+        "$AUTODEV_PROMPTS/developer.md")" \
+      "$T_DESIGN,$T_SETUP" "dev2")
+
+    # ── Phase 4: 코드 완성 후 ──
+    T_QA=$(tq_add "$queue" \
+      "QA 및 자동 수정" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
+        "$AUTODEV_PROMPTS/qa.md")" \
+      "$T_CORE,$T_UI" "qa")
+
+    tq_add "$queue" \
+      "Git 커밋 및 PR 생성" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
+        "$AUTODEV_PROMPTS/git.md")" \
+      "$T_QA" "git" > /dev/null
+
+    log_success "태스크 등록 완료 (총 9개)"
+  fi
 
   # DAG 의존성 순환 검증
   if ! tq_validate_dag "$queue"; then
@@ -205,7 +328,7 @@ step_register_tasks() {
 
   # 태스크 목록 출력
   echo ""
-  jq -r '.tasks[] | "  [\(.id)] \(.subject) (의존: \(.depends_on | join(", ") | if . == "" then "없음" else . end))"' \
+  jq -r '.tasks[] | "  [\(.id)] \(.subject) → \(.assigned_to // "any") (의존: \(.depends_on | join(", ") | if . == "" then "없음" else . end))"' \
     "$queue" | while read -r line; do
     echo -e "${_DIM}$line${_N}"
   done
@@ -220,29 +343,31 @@ step_spawn_agents() {
 
   log_step "STEP 3/5  에이전트 스폰"
 
+  local model="${AUTODEV_MODEL:-}"
+
   # planner + architect: Phase 1 병렬 처리
   agent_spawn "$team" "planner"   "PRD 작성 및 제품 기획 전문가" \
-    "Read,Write,Edit,Bash,WebSearch,WebFetch,Skill"
+    "Read,Write,Edit,Bash,WebSearch,WebFetch,Skill" "$model"
   agent_spawn "$team" "architect" "기술스택 결정 및 시스템 아키텍처 전문가" \
-    "Read,Write,Edit,Bash,Glob,Grep,Skill"
+    "Read,Write,Edit,Bash,Glob,Grep,Skill" "$model"
 
   sleep 1
 
   # designer: Phase 2 대기 후 처리
   agent_spawn "$team" "designer"  "UI/UX 디자인 스펙 전문가" \
-    "Read,Write,Edit,Bash,Glob,Grep,Skill"
+    "Read,Write,Edit,Bash,Glob,Grep,Skill" "$model"
 
   # developer: Phase 3~4 핵심 에이전트 (2개 병렬)
   agent_spawn "$team" "dev1"      "풀스택 개발자 — 핵심 기능 담당" \
-    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch,Skill"
+    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch,Skill" "$model"
   agent_spawn "$team" "dev2"      "풀스택 개발자 — UI 컴포넌트 담당" \
-    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch,Skill"
+    "Read,Write,Edit,Bash,Glob,Grep,WebSearch,WebFetch,Skill" "$model"
 
   # qa + git: 마지막 단계
   agent_spawn "$team" "qa"        "QA 엔지니어 — 테스트 및 품질 보증" \
-    "Read,Write,Edit,Bash,Glob,Grep,Skill"
+    "Read,Write,Edit,Bash,Glob,Grep,Skill" "$model"
   agent_spawn "$team" "git"       "Git 관리자 — 커밋 및 PR 생성" \
-    "Read,Write,Edit,Bash,Glob,Grep"
+    "Read,Write,Edit,Bash,Glob,Grep" "$model"
 
   log_success "에이전트 7개 스폰 완료"
 }
@@ -420,14 +545,20 @@ $(cat "$HOME/.handle-it/CLAUDE.md" 2>/dev/null || echo '컨텍스트 없음')
 
   RERUN_TIMEOUT="${AUTODEV_TASK_TIMEOUT:-900}"
   RESULT_FILE=$(mktemp)
+  RERUN_MODEL="${AUTODEV_MODEL:-}"
+  RERUN_MODEL_FLAG=""
+  if [ -n "$RERUN_MODEL" ]; then
+    RERUN_MODEL_FLAG="--model $RERUN_MODEL"
+  fi
   log_info "Claude 실행 중 (타임아웃: ${RERUN_TIMEOUT}초)..."
 
   (
     unset CLAUDECODE 2>/dev/null || true
     "$CLAUDE_BIN" --print \
+      $RERUN_MODEL_FLAG \
       --allowedTools "Read,Write,Edit,Bash,Glob,Grep,Skill" \
       --dangerously-skip-permissions \
-      -p "$CLAUDE_PROMPT" > "$RESULT_FILE" 2>&1
+      -p "$CLAUDE_PROMPT" 2>&1 | tee "$RESULT_FILE"
   ) &
   CLAUDE_PID=$!
 

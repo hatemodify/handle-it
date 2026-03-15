@@ -57,12 +57,15 @@
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label" for="input-idea">Idea</label>
-          <textarea class="form-textarea" id="input-idea" placeholder="AI diary app with sentiment analysis and dark mode..."></textarea>
+          <label class="form-label" for="input-idea">Idea / Modification Request</label>
+          <textarea class="form-textarea" id="input-idea" placeholder="New: AI diary app with sentiment analysis&#10;Modify: Add dark mode and Korean language support"></textarea>
         </div>
         <div class="form-group">
-          <label class="form-label" for="input-project-dir">Project Directory (optional)</label>
+          <label class="form-label" for="input-project-dir">Project Directory</label>
           <input class="form-input" id="input-project-dir" type="text" placeholder="~/projects/my-app">
+          <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
+            Existing project path = modify mode. Empty = new project.
+          </div>
         </div>
       </div>
       <div class="modal-footer">

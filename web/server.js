@@ -99,6 +99,32 @@ function getTeamDetail(teamId) {
     return { ...a, alive, last_heartbeat: lastHeartbeat };
   });
 
+  // Lead agent (main autodev.sh process) — detect from PID or status
+  const leadPidFile = join(teamDir, 'agents', 'lead.pid');
+  let leadAgent = null;
+  if (config?.status === 'active') {
+    let leadAlive = false;
+    if (existsSync(leadPidFile)) {
+      try {
+        const leadPid = parseInt(readFileSync(leadPidFile, 'utf-8').trim(), 10);
+        process.kill(leadPid, 0);
+        leadAlive = true;
+      } catch {}
+    } else {
+      // If pipeline is active and child process is running, lead is alive
+      leadAlive = true;
+    }
+    leadAgent = {
+      name: 'lead',
+      role: '리드 오케스트레이터 — 헬스체크, 진행률, 태스크 재할당',
+      status: leadAlive ? 'active' : 'stopped',
+      alive: leadAlive,
+      pid: null,
+    };
+  }
+
+  const allAgents = leadAgent ? [leadAgent, ...agents] : agents;
+
   return {
     id: teamId,
     team_name: config?.team_name || teamId,
@@ -106,7 +132,7 @@ function getTeamDetail(teamId) {
     created_at: config?.created_at || null,
     project_dir: projectDir,
     tasks: queue?.tasks || [],
-    agents,
+    agents: allAgents,
   };
 }
 
@@ -318,6 +344,7 @@ function startPipeline(idea, projectDir) {
       AUTODEV_HEALTH_INTERVAL: String(config.health_interval || 5),
       AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 900),
       CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
+      AUTODEV_MODEL: config.model || process.env.AUTODEV_MODEL || '',
       AUTODEV_AGENTS: (config.agents || []).join(','),
     };
 
@@ -400,6 +427,7 @@ function resumePipeline(teamId) {
     AUTODEV_HEALTH_INTERVAL: String(config.health_interval || 5),
     AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 900),
     CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
+    AUTODEV_MODEL: config.model || process.env.AUTODEV_MODEL || '',
     HANDLE_IT_RESUME_TEAM: teamId,
   };
 
@@ -429,6 +457,7 @@ function rerunTask(teamId, taskId) {
     AUTODEV_TIMEOUT: String(config.timeout || 7200),
     AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 900),
     CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
+    AUTODEV_MODEL: config.model || process.env.AUTODEV_MODEL || '',
     HANDLE_IT_RERUN_TEAM: teamId,
     HANDLE_IT_RERUN_TASK: taskId,
   };

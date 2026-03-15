@@ -285,6 +285,9 @@ const app = (() => {
       }
       loadAndRenderLog();
     }
+    if (currentView === 'reports') {
+      renderReportsView();
+    }
   }
 
   function switchView(view) {

@@ -56,6 +56,7 @@ agent_spawn() {
   local agent_name="$2"
   local role="$3"
   local allowed_tools="${4:-Read,Write,Edit,Bash}"
+  local model="${5:-${AUTODEV_MODEL:-}}"
   local team_dir="$TEAMS_ROOT/$team_name"
   local runner="$team_dir/agents/${agent_name}.sh"
   local log_file="$team_dir/logs/${agent_name}.log"
@@ -134,6 +135,12 @@ while true; do
   log_agent "$agent_name" "태스크 시작: \$TASK_ID [\$TASK_SUBJECT]"
   TASK_STARTED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+  # 모델 플래그
+  CLAUDE_MODEL_FLAG=""
+  if [ -n "$model" ]; then
+    CLAUDE_MODEL_FLAG="--model $model"
+  fi
+
   # 4. Claude 실행
   CLAUDE_PROMPT=\$(cat <<PROMPT_EOF
 당신은 AutoDev 팀의 전문 에이전트입니다.
@@ -168,12 +175,14 @@ PROMPT_EOF
   # Claude 실행 (타임아웃 + CLAUDECODE 환경변수만 해제)
   CLAUDE_TASK_TIMEOUT="\${AUTODEV_TASK_TIMEOUT:-900}"
   RESULT_FILE=\$(mktemp)
+  log_agent "$agent_name" "── Claude 출력 시작 ──"
   (
     unset CLAUDECODE 2>/dev/null || true
     \$CLAUDE_BIN --print \\
+      \$CLAUDE_MODEL_FLAG \\
       --allowedTools "$allowed_tools" \\
       --dangerously-skip-permissions \\
-      -p "\$CLAUDE_PROMPT" > "\$RESULT_FILE" 2>&1
+      -p "\$CLAUDE_PROMPT" 2>&1 | tee "\$RESULT_FILE"
   ) &
   CLAUDE_PID=\$!
 
@@ -267,7 +276,8 @@ RUNNER_EOF
      --arg role "$role" \
      --argjson pid "$pid" \
      --arg tools "$allowed_tools" \
-     '.agents += [{name: $name, role: $role, pid: $pid, status: "running", allowed_tools: $tools, respawn_count: 0}]' \
+     --arg model "$model" \
+     '.agents += [{name: $name, role: $role, pid: $pid, status: "running", allowed_tools: $tools, model: $model, respawn_count: 0}]' \
      "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
 
   log_agent "$agent_name" "스폰 완료 (PID: $pid)"

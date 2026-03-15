@@ -90,6 +90,7 @@ tq_add() {
   local subject="$2"
   local description="$3"
   local depends_on="${4:-}"
+  local assigned_to="${5:-}"
   local lockfile="${queue_file}.lock"
 
   _lock "$lockfile"
@@ -110,12 +111,14 @@ tq_add() {
      --arg subject "$subject" \
      --arg desc "$description" \
      --argjson deps "$deps_json" \
+     --arg assigned "$assigned_to" \
      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '.tasks += [{
        id: $id,
        subject: $subject,
        description: $desc,
        depends_on: $deps,
+       assigned_to: (if $assigned == "" then null else $assigned end),
        status: "pending",
        owner: null,
        created_at: $ts,
@@ -148,12 +151,14 @@ tq_claim() {
   local completed_ids
   completed_ids=$(jq -r '[.tasks[] | select(.status=="completed") | .id]' "$queue_file")
 
-  # pending + 의존성 모두 완료된 첫 태스크 선택
+  # pending + 의존성 모두 완료 + assigned_to 매칭된 첫 태스크 선택
   local task_id
   task_id=$(jq -r \
     --argjson completed "$completed_ids" \
+    --arg agent "$agent_name" \
     '.tasks[]
      | select(.status == "pending" and .owner == null)
+     | select(.assigned_to == null or .assigned_to == $agent)
      | select(
          (.depends_on | length) == 0 or
          (.depends_on | all(. as $dep | $completed | index($dep) != null))

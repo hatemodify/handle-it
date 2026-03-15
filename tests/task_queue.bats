@@ -105,6 +105,24 @@ teardown() {
   [ "$id" = "none" ]
 }
 
+@test "tq_claim respects assigned_to affinity" {
+  tq_init "$QUEUE"
+  tq_add "$QUEUE" "Task 1" "Desc" "" "planner"
+  # agent "dev1" should NOT claim planner's task
+  id=$(tq_claim "$QUEUE" "dev1")
+  [ "$id" = "none" ]
+  # agent "planner" SHOULD claim it
+  id=$(tq_claim "$QUEUE" "planner")
+  [ "$id" = "task_001" ]
+}
+
+@test "tq_claim allows unassigned task for any agent" {
+  tq_init "$QUEUE"
+  tq_add "$QUEUE" "Task 1" "Desc" "" ""
+  id=$(tq_claim "$QUEUE" "any_agent")
+  [ "$id" = "task_001" ]
+}
+
 @test "tq_claim skips task with unmet dependencies" {
   tq_init "$QUEUE"
   t1=$(tq_add "$QUEUE" "Task 1" "Desc 1")
