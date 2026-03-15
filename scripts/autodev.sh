@@ -86,26 +86,6 @@ print_banner() {
 step_init() {
   log_step "STEP 1/5  초기화"
 
-  # 기존 프로젝트 감지
-  MODIFY_MODE=false
-  EXISTING_FILES=""
-  if [ -d "$PROJECT_DIR" ]; then
-    local file_count
-    file_count=$(find "$PROJECT_DIR" -type f \
-      ! -path "*/node_modules/*" ! -path "*/.git/*" \
-      ! -path "*/.next/*" ! -path "*/dist/*" \
-      2>/dev/null | head -20 | wc -l | tr -d ' ')
-    if [ "$file_count" -gt 0 ]; then
-      MODIFY_MODE=true
-      EXISTING_FILES=$(find "$PROJECT_DIR" -type f \
-        ! -path "*/node_modules/*" ! -path "*/.git/*" \
-        ! -path "*/.next/*" ! -path "*/dist/*" \
-        2>/dev/null | head -50 | sed "s|^$PROJECT_DIR/||" | sort)
-      log_info "기존 프로젝트 감지 (${file_count}개 파일) → 수정 모드"
-    fi
-  fi
-  export MODIFY_MODE
-
   # 프로젝트 디렉토리 생성
   mkdir -p "$PROJECT_DIR"
 
@@ -622,6 +602,25 @@ main() {
       exit 1
     }
   done
+
+  # 기존 프로젝트 감지 (서브쉘 밖에서 실행해야 변수 유지)
+  MODIFY_MODE=false
+  EXISTING_FILES=""
+  if [ -d "$PROJECT_DIR" ]; then
+    local file_count
+    file_count=$(find "$PROJECT_DIR" -type f \
+      ! -path "*/node_modules/*" ! -path "*/.git/*" \
+      ! -path "*/.next/*" ! -path "*/dist/*" \
+      2>/dev/null | head -20 | wc -l | tr -d ' ')
+    if [ "$file_count" -gt 0 ]; then
+      MODIFY_MODE=true
+      EXISTING_FILES=$(find "$PROJECT_DIR" -type f \
+        ! -path "*/node_modules/*" ! -path "*/.git/*" \
+        ! -path "*/.next/*" ! -path "*/dist/*" \
+        2>/dev/null | head -50 | sed "s|^$PROJECT_DIR/||" | sort)
+      log_info "기존 프로젝트 감지 (${file_count}개 파일) → 수정 모드"
+    fi
+  fi
 
   # 파이프라인 실행
   TEAM_DIR=$(step_init)
