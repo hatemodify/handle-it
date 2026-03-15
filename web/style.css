@@ -1093,18 +1093,28 @@ tr:hover td { background: rgba(88, 166, 255, 0.04); }
   white-space: nowrap;
 }
 
-.folder-browser-current-project {
-  padding: 8px 12px;
-  background: rgba(46, 160, 67, 0.08);
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
+.folder-project-hint {
+  margin-left: auto;
+  font-size: 10px;
   color: var(--accent-green);
-  cursor: pointer;
-  transition: background var(--transition);
+  background: rgba(46, 160, 67, 0.1);
+  border: 1px solid rgba(46, 160, 67, 0.3);
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
 }
 
-.folder-browser-current-project:hover {
-  background: rgba(46, 160, 67, 0.15);
+.folder-browser-footer {
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.folder-select-btn {
+  width: 100%;
+  justify-content: center;
 }
 
 /* ── Follow-up Prompt ── */

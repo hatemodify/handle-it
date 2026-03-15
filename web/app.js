@@ -326,7 +326,8 @@ const app = (() => {
         <div class="team-header-right">
           ${teamDetail.status === 'active'
             ? `<button class="btn btn-danger btn-sm" onclick="app.stopPipeline('${teamDetail.id}')">Stop Pipeline</button>`
-            : `<button class="btn btn-sm" onclick="app.resumePipeline('${teamDetail.id}')">Resume Pipeline</button>`
+            : `<button class="btn btn-sm" onclick="app.resumePipeline('${teamDetail.id}')">Resume</button>
+               <button class="btn btn-danger btn-sm" onclick="app.deletePipeline('${teamDetail.id}')">Delete</button>`
           }
         </div>
       </div>
@@ -967,9 +968,11 @@ const app = (() => {
   async function browseTo(dirPath) {
     const list = $('folder-browser-list');
     const pathEl = $('folder-browser-path');
+    const footer = $('folder-browser-footer');
     if (!list) return;
 
     list.innerHTML = '<div style="padding: 12px; color: var(--text-dim);">Loading...</div>';
+    if (footer) footer.innerHTML = '';
 
     try {
       const data = await api(`/browse?path=${encodeURIComponent(dirPath)}`);
@@ -981,27 +984,28 @@ const app = (() => {
       folderBrowserPath = data.path;
       if (pathEl) pathEl.textContent = data.path;
 
+      // Folder list — click navigates into subfolder
       if (data.entries.length === 0) {
         list.innerHTML = '<div style="padding: 12px; color: var(--text-dim);">No subdirectories</div>';
       } else {
         list.innerHTML = data.entries.map(e => `
-          <div class="folder-browser-item ${e.path === $('input-import-dir')?.value ? 'selected' : ''}"
-               ondblclick="app.browseTo('${escapeHtml(e.path)}')"
-               onclick="app.selectFolder('${escapeHtml(e.path)}', '${escapeHtml(e.name)}')">
+          <div class="folder-browser-item" onclick="app.browseTo('${escapeHtml(e.path)}')">
             <span class="folder-icon">&#128193;</span>
             <span class="folder-name">${escapeHtml(e.name)}</span>
+            ${e.is_project ? '<span class="folder-project-hint">project</span>' : ''}
           </div>
         `).join('');
       }
 
-      // If current dir is a project, offer to select it
-      if (data.is_project) {
-        const currentName = data.path.split('/').pop();
-        list.insertAdjacentHTML('beforebegin', `
-          <div class="folder-browser-current-project" onclick="app.selectFolder('${escapeHtml(data.path)}', '${escapeHtml(currentName)}')">
-            <span>&#10004;</span> This folder is a project — click to select <strong>${escapeHtml(currentName)}</strong>
-          </div>
-        `);
+      // Footer — select current folder button
+      if (footer) {
+        const currentName = data.path.split('/').pop() || data.path;
+        footer.innerHTML = `
+          <button class="btn btn-primary btn-sm folder-select-btn"
+            onclick="app.selectFolder('${escapeHtml(data.path)}', '${escapeHtml(currentName)}')">
+            Select this folder${data.is_project ? ' (project detected)' : ''}
+          </button>
+        `;
       }
     } catch (err) {
       list.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">Error: ${escapeHtml(err.message)}</div>`;
@@ -1123,6 +1127,16 @@ const app = (() => {
     }, 1000);
   }
 
+  async function deletePipeline(teamId) {
+    const name = teamDetail?.team_name || teamId;
+    if (!confirm(`Delete pipeline "${name}"?\nThis removes all team data (logs, reports, queue). Project source files are not affected.`)) return;
+    await api(`/pipeline/${teamId}/delete`, { method: 'POST' });
+    currentTeamId = null;
+    teamDetail = null;
+    await loadTeams();
+    navigate('#/');
+  }
+
   async function resumePipeline(teamId) {
     await api(`/pipeline/${teamId}/resume`, { method: 'POST' });
     setTimeout(() => {
@@ -1235,6 +1249,7 @@ const app = (() => {
     startImport,
     startFollowUp,
     stopPipeline,
+    deletePipeline,
     resumePipeline,
     rerunTask,
     switchView,

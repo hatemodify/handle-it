@@ -3,7 +3,7 @@
 //  API + SSE + Static Files (zero dependencies)
 // ═══════════════════════════════════════════════════
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, watch, readFile } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, watch, readFile, rmSync } from 'node:fs';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -312,6 +312,9 @@ function browseDirs(dirPath) {
     const stat = statSync(resolved);
     if (!stat.isDirectory()) return { error: 'Not a directory', path: resolved };
 
+    const projectFiles = ['package.json', 'Cargo.toml', 'go.mod', 'pyproject.toml', 'pom.xml',
+      'Gemfile', 'requirements.txt', 'composer.json', 'build.gradle', 'Makefile', '.git'];
+
     const entries = readdirSync(resolved, { withFileTypes: true })
       .filter(d => {
         // Only directories, skip hidden and node_modules
@@ -320,15 +323,13 @@ function browseDirs(dirPath) {
         if (d.name === 'node_modules') return false;
         return true;
       })
-      .map(d => ({
-        name: d.name,
-        path: join(resolved, d.name),
-      }))
+      .map(d => {
+        const childPath = join(resolved, d.name);
+        const childIsProject = projectFiles.some(f => existsSync(join(childPath, f)));
+        return { name: d.name, path: childPath, is_project: childIsProject };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Check if this dir looks like a project (has package.json, Cargo.toml, etc.)
-    const projectFiles = ['package.json', 'Cargo.toml', 'go.mod', 'pyproject.toml', 'pom.xml',
-      'Gemfile', 'requirements.txt', 'composer.json', 'build.gradle', 'Makefile', '.git'];
     const isProject = projectFiles.some(f => existsSync(join(resolved, f)));
 
     return {
@@ -581,6 +582,21 @@ function stopPipeline(teamId) {
   return false;
 }
 
+function deletePipeline(teamId) {
+  // Stop first if running
+  stopPipeline(teamId);
+
+  const teamDir = join(TEAMS_ROOT, teamId);
+  if (!existsSync(teamDir)) return false;
+
+  try {
+    rmSync(teamDir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function resumePipeline(teamId) {
   const configPath = join(process.cwd(), 'handle-it.config.json');
   let config = {};
@@ -779,6 +795,14 @@ const server = createServer(async (req, res) => {
       if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
       const stopped = stopPipeline(params.id);
       return jsonResponse(res, { stopped });
+    }
+
+    // POST /api/pipeline/:id/delete
+    params = matchRoute(path, '/api/pipeline/:id/delete');
+    if (method === 'POST' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      const deleted = deletePipeline(params.id);
+      return jsonResponse(res, { deleted });
     }
 
     // POST /api/pipeline/:id/resume
