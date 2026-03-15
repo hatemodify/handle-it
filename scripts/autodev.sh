@@ -212,18 +212,24 @@ step_register_tasks() {
       "수정 요청($IDEA)을 분석하고 구체적인 변경 계획을 change_plan.md로 작성. 변경할 파일 목록, 추가할 의존성, 영향 범위 분석 포함. 프로젝트: $PROJECT_DIR" \
       "$T_ANALYSIS" "planner")
 
+    # Review Gate
+    T_REVIEW=$(tq_add "$queue" \
+      "변경 계획 검토 대기" \
+      "분석 결과와 변경 계획을 사용자가 검토합니다. Web UI에서 승인하면 구현을 시작합니다." \
+      "$T_PLAN" "__review__")
+
     # Phase 2: 구현 (병렬)
     T_IMPL1=$(tq_add "$queue" \
       "핵심 변경 구현" \
       "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|change_plan.md의 핵심 변경사항 구현. 기존 코드 스타일 유지. 수정 요청: $IDEA|g" \
         "$AUTODEV_PROMPTS/developer.md")" \
-      "$T_PLAN" "dev1")
+      "$T_REVIEW" "dev1")
 
     T_IMPL2=$(tq_add "$queue" \
       "UI/스타일 변경" \
       "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|change_plan.md의 UI 관련 변경사항 구현. 기존 디자인 시스템 유지. 수정 요청: $IDEA|g" \
         "$AUTODEV_PROMPTS/developer.md")" \
-      "$T_PLAN" "dev2")
+      "$T_REVIEW" "dev2")
 
     # Phase 3: QA + Git
     T_QA=$(tq_add "$queue" \
@@ -238,7 +244,7 @@ step_register_tasks() {
         "$AUTODEV_PROMPTS/git.md") — 변경사항만 커밋. 수정 요청: $IDEA" \
       "$T_QA" "git" > /dev/null
 
-    log_success "태스크 등록 완료 (수정 모드, 총 6개)"
+    log_success "태스크 등록 완료 (수정 모드, 총 7개)"
   else
     # ── 신규 모드: 기존 9개 태스크 ──
 
@@ -267,12 +273,18 @@ step_register_tasks() {
         "$AUTODEV_PROMPTS/architect.md") — 태스크 분해 단계만 실행" \
       "$T_PRD,$T_STACK" "architect")
 
-    # ── Phase 3: 태스크 분해 완료 후 (tasks.json 기반 동적 실행) ──
+    # ── Review Gate: 사람 검토 후 개발 진행 ──
+    T_REVIEW=$(tq_add "$queue" \
+      "계획 검토 대기" \
+      "PRD, 기술스택, 태스크 분해 결과를 사용자가 검토합니다. Web UI에서 승인하면 개발을 시작합니다." \
+      "$T_TASKS,$T_DESIGN" "__review__")
+
+    # ── Phase 3: 검토 승인 후 (tasks.json 기반 동적 실행) ──
     T_SETUP=$(tq_add "$queue" \
       "프로젝트 초기 세팅" \
       "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 기술스택으로 프로젝트 초기화. package.json, tsconfig, eslint, tailwind 설정. tasks.json의 Phase 1 태스크를 모두 실행.|g" \
         "$AUTODEV_PROMPTS/developer.md")" \
-      "$T_TASKS" "dev1")
+      "$T_REVIEW" "dev1")
 
     T_CORE=$(tq_add "$queue" \
       "백엔드/로직 구현" \
@@ -299,7 +311,7 @@ step_register_tasks() {
         "$AUTODEV_PROMPTS/git.md")" \
       "$T_QA" "git" > /dev/null
 
-    log_success "태스크 등록 완료 (총 8개)"
+    log_success "태스크 등록 완료 (총 10개)"
   fi
 
   # DAG 의존성 순환 검증

@@ -6,13 +6,14 @@
 const app = (() => {
   // ── State ──
   let currentTeamId = null;
-  let currentView = 'overview'; // overview | logs | reports
+  let currentView = 'overview'; // overview | logs | reports | review
   let teams = [];
   let teamDetail = null;
   let eventSource = null;
   let logData = {};        // { agent: [lines] }
   let activeLogAgent = null;
   let pollInterval = null;
+  let reviewData = null;   // cached review documents
 
   // ── API ──
   async function api(path, options = {}) {
@@ -97,8 +98,17 @@ const app = (() => {
     eventSource.addEventListener('task-update', (e) => {
       const data = JSON.parse(e.data);
       if (teamDetail) {
+        const prevReviewPending = hasReviewPending();
         teamDetail.tasks = data.tasks;
-        if (currentView === 'overview') renderTeamView();
+        const nowReviewPending = hasReviewPending();
+
+        // Auto-navigate to review when it becomes available
+        if (!prevReviewPending && nowReviewPending && currentView === 'overview') {
+          switchView('review');
+          return;
+        }
+
+        if (currentView === 'overview' || currentView === 'review') renderTeamView();
         updateSidebarProgress(teamId, data.tasks);
       }
     });
@@ -203,60 +213,122 @@ const app = (() => {
     if (teams.length === 0) {
       renderMain(`
         <div class="empty-state">
-          <div class="empty-state-icon">&#9881;</div>
-          <div class="empty-state-text">No pipelines yet. Start one to begin.</div>
-          <button class="btn btn-primary" onclick="app.showNewPipelineModal()">+ New Pipeline</button>
+          <div class="empty-state-icon">&#128640;</div>
+          <div class="empty-state-text">No pipelines yet</div>
+          <p style="color: var(--text-dim); font-size: 13px; margin-bottom: 20px;">
+            Start a new pipeline from an idea, or import an existing project to modify.
+          </p>
+          <div style="display: flex; gap: 8px; justify-content: center;">
+            <button class="btn" onclick="app.showImportModal()">Import Project</button>
+            <button class="btn btn-primary" onclick="app.showNewPipelineModal()">+ New Pipeline</button>
+          </div>
         </div>
       `);
     } else {
-      renderMain(`
-        <h2 style="color: var(--text-primary); margin-bottom: 16px;">All Teams</h2>
-        <div class="grid-2">
-          ${teams.map(t => {
-            const pct = t.progress.total > 0 ? Math.round(t.progress.completed / t.progress.total * 100) : 0;
-            return `
-              <div class="card" style="cursor: pointer;" onclick="location.hash='#/team/${t.id}'">
-                <div class="card-header">
-                  <span class="card-title">${escapeHtml(t.team_name)}</span>
-                  <span class="status-text" style="color: ${t.status === 'active' ? 'var(--accent-green)' : 'var(--text-dim)'}">${t.status}</span>
-                </div>
-                <div class="card-body">
-                  <div class="progress-bar" style="height: 8px; border-radius: 4px;">
-                    <div class="progress-fill" style="width: ${pct}%; border-radius: 4px;"></div>
-                  </div>
-                  <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">
-                    ${t.progress.completed}/${t.progress.total} completed
-                    ${t.progress.failed > 0 ? ` &middot; <span style="color: var(--accent-red)">${t.progress.failed} failed</span>` : ''}
-                    ${t.progress.in_progress > 0 ? ` &middot; <span style="color: var(--accent-blue)">${t.progress.in_progress} running</span>` : ''}
-                  </div>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      `);
+      const active = teams.filter(t => t.status === 'active');
+      const inactive = teams.filter(t => t.status !== 'active');
+
+      let html = '';
+
+      if (active.length > 0) {
+        html += `<div class="section-label">Active Pipelines</div>`;
+        html += `<div class="grid-2">${active.map(renderTeamCard).join('')}</div>`;
+      }
+
+      if (inactive.length > 0) {
+        html += `<div class="section-label" style="margin-top: 24px;">History</div>`;
+        html += `<div class="grid-2">${inactive.map(renderTeamCard).join('')}</div>`;
+      }
+
+      renderMain(html);
     }
   }
 
+  function renderTeamCard(t) {
+    const pct = t.progress.total > 0 ? Math.round(t.progress.completed / t.progress.total * 100) : 0;
+    const isActive = t.status === 'active';
+    const timeAgo = formatTimeAgo(t.mtime);
+
+    return `
+      <div class="card team-card ${isActive ? 'team-card-active' : ''}" onclick="location.hash='#/team/${t.id}'">
+        <div class="card-body">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+            <div class="team-card-name">${escapeHtml(t.team_name)}</div>
+            <span class="pipeline-status ${t.status}">${t.status}</span>
+          </div>
+          <div class="progress-bar" style="height: 6px; border-radius: 3px;">
+            <div class="progress-fill" style="width: ${pct}%; border-radius: 3px;"></div>
+          </div>
+          <div class="team-card-meta">
+            <span>${t.progress.completed}/${t.progress.total} tasks</span>
+            ${t.progress.failed > 0 ? `<span style="color: var(--accent-red);">${t.progress.failed} failed</span>` : ''}
+            ${t.progress.in_progress > 0 ? `<span style="color: var(--accent-blue);">${t.progress.in_progress} running</span>` : ''}
+            <span style="margin-left: auto;">${timeAgo}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function formatTimeAgo(ms) {
+    const diff = Date.now() - ms;
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    return `${d}d ago`;
+  }
+
   // ── Team View ──
+  function hasReviewPending() {
+    const tasks = teamDetail?.tasks || [];
+    const reviewTask = tasks.find(t => t.assigned_to === '__review__');
+    if (!reviewTask || reviewTask.status !== 'pending') return false;
+    const depsDone = (reviewTask.depends_on || []).every(depId => {
+      const dep = tasks.find(t => t.id === depId);
+      return dep?.status === 'completed';
+    });
+    return depsDone;
+  }
+
   function renderTeamView() {
     if (!teamDetail) return;
+
+    const reviewPending = hasReviewPending();
+    const reviewBadge = reviewPending ? '<span class="review-badge">Review Required</span>' : '';
 
     const tabs = `
       <div class="nav-tabs">
         <button class="nav-tab ${currentView === 'overview' ? 'active' : ''}" onclick="app.switchView('overview')">Overview</button>
+        <button class="nav-tab ${currentView === 'review' ? 'active' : ''}" onclick="app.switchView('review')">
+          Review ${reviewBadge}
+        </button>
         <button class="nav-tab ${currentView === 'logs' ? 'active' : ''}" onclick="app.switchView('logs')">Logs</button>
         <button class="nav-tab ${currentView === 'reports' ? 'active' : ''}" onclick="app.switchView('reports')">Reports</button>
       </div>
     `;
 
+    const statusLabel = teamDetail.status === 'active'
+      ? '<span class="pipeline-status active">Running</span>'
+      : teamDetail.status === 'completed'
+        ? '<span class="pipeline-status completed">Completed</span>'
+        : '<span class="pipeline-status stopped">Stopped</span>';
+
     const actions = `
-      <div style="display: flex; gap: 8px; margin-bottom: 16px; align-items: center;">
-        <h2 style="color: var(--text-primary); flex: 1;">${escapeHtml(teamDetail.team_name)}</h2>
-        ${teamDetail.status === 'active' ?
-          `<button class="btn btn-danger btn-sm" onclick="app.stopPipeline('${teamDetail.id}')">Stop</button>` :
-          `<button class="btn btn-sm" onclick="app.resumePipeline('${teamDetail.id}')">Resume</button>`
-        }
+      <div class="team-header">
+        <div class="team-header-left">
+          <h2 class="team-title">${escapeHtml(teamDetail.team_name)}</h2>
+          ${statusLabel}
+        </div>
+        <div class="team-header-right">
+          ${teamDetail.status === 'active'
+            ? `<button class="btn btn-danger btn-sm" onclick="app.stopPipeline('${teamDetail.id}')">Stop Pipeline</button>`
+            : `<button class="btn btn-sm" onclick="app.resumePipeline('${teamDetail.id}')">Resume Pipeline</button>`
+          }
+        </div>
       </div>
     `;
 
@@ -264,6 +336,9 @@ const app = (() => {
     switch (currentView) {
       case 'overview':
         content = renderOverview();
+        break;
+      case 'review':
+        content = '<div id="review-container"><div class="loading-spinner"></div></div>';
         break;
       case 'logs':
         content = renderLogsView();
@@ -273,11 +348,23 @@ const app = (() => {
         break;
     }
 
-    renderMain(actions + tabs + content);
+    // If review is pending and user is on overview, show a banner
+    const reviewBanner = (reviewPending && currentView === 'overview')
+      ? `<div class="review-banner" onclick="app.switchView('review')">
+           <span class="review-banner-icon">&#9998;</span>
+           <span>Planning phase complete. Review and approve to start development.</span>
+           <button class="btn btn-primary btn-sm">Review Now</button>
+         </div>`
+      : '';
+
+    renderMain(actions + tabs + reviewBanner + content);
 
     // Post-render hooks
     if (currentView === 'overview') {
       renderDependencyGraph();
+    }
+    if (currentView === 'review') {
+      loadAndRenderReview();
     }
     if (currentView === 'logs') {
       if (!activeLogAgent && teamDetail.agents.length > 0) {
@@ -330,18 +417,27 @@ const app = (() => {
             <table>
               <thead><tr><th>Status</th><th>ID</th><th>Task</th><th>Assigned</th><th>Owner</th><th></th></tr></thead>
               <tbody>
-                ${tasks.map(t => `
-                  <tr>
+                ${tasks.map(t => {
+                  const isReview = t.assigned_to === '__review__';
+                  const reviewReady = isReview && t.status === 'pending' && (t.depends_on || []).every(depId => {
+                    const dep = tasks.find(d => d.id === depId);
+                    return dep?.status === 'completed';
+                  });
+                  return `
+                  <tr class="${isReview ? 'review-task-row' : ''}">
                     <td class="status-${t.status}"><span class="status-dot"></span><span class="status-text">${t.status}</span></td>
                     <td style="font-family: var(--font-mono); font-size: 12px;">${escapeHtml(t.id)}</td>
-                    <td>${escapeHtml(t.subject)}</td>
-                    <td style="color: var(--text-dim); font-size: 12px;">${escapeHtml(t.assigned_to || 'any')}</td>
+                    <td>${escapeHtml(t.subject)}${isReview ? ' <span class="review-task-label">checkpoint</span>' : ''}</td>
+                    <td style="color: var(--text-dim); font-size: 12px;">${isReview ? 'user' : escapeHtml(t.assigned_to || 'any')}</td>
                     <td style="color: var(--accent-purple);">${escapeHtml(t.owner || '-')}</td>
-                    <td>${t.status === 'failed' || t.status === 'completed' ?
-                      `<button class="btn btn-sm" onclick="app.rerunTask('${teamDetail.id}', '${t.id}')">Rerun</button>` : ''
+                    <td>${reviewReady
+                      ? `<button class="btn btn-primary btn-sm" onclick="app.switchView('review')">Review</button>`
+                      : (t.status === 'failed' || t.status === 'completed')
+                        ? `<button class="btn btn-sm" onclick="app.rerunTask('${teamDetail.id}', '${t.id}')">Rerun</button>`
+                        : ''
                     }</td>
-                  </tr>
-                `).join('')}
+                  </tr>`;
+                }).join('')}
               </tbody>
             </table>
           </div>
@@ -634,6 +730,172 @@ const app = (() => {
     `).join('');
   }
 
+  // ── Review Panel ──
+  async function loadAndRenderReview() {
+    if (!currentTeamId) return;
+    const container = $('review-container');
+    if (!container) return;
+
+    try {
+      reviewData = await api(`/teams/${currentTeamId}/review`);
+    } catch {
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-text">Failed to load review data</div></div>';
+      return;
+    }
+
+    if (!reviewData.has_review) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-text">No review checkpoint in this pipeline</div></div>';
+      return;
+    }
+
+    if (reviewData.is_completed) {
+      container.innerHTML = `
+        <div class="review-approved">
+          <div class="review-approved-icon">&#10003;</div>
+          <div class="review-approved-text">Review approved — development is in progress</div>
+        </div>
+        ${renderReviewDocuments(reviewData.documents)}
+      `;
+      return;
+    }
+
+    if (!reviewData.is_pending) {
+      container.innerHTML = `
+        <div class="review-waiting">
+          <div class="loading-spinner"></div>
+          <div class="review-waiting-text">Waiting for planning phase to complete...</div>
+          <div class="review-waiting-sub">The review will be available once PRD, architecture, and task breakdown are finished.</div>
+        </div>
+      `;
+      return;
+    }
+
+    // Review is pending — show documents + approve/reject
+    container.innerHTML = `
+      <div class="review-panel">
+        <div class="review-panel-header">
+          <h3>Review Planning Documents</h3>
+          <p>The planning phase is complete. Review the documents below and approve to start development, or request changes.</p>
+        </div>
+        ${renderReviewDocuments(reviewData.documents)}
+        <div class="review-actions">
+          <div class="review-feedback-group">
+            <label class="form-label">Feedback (optional, for rejection)</label>
+            <textarea class="form-textarea" id="review-feedback" rows="3" placeholder="Describe what needs to change..."></textarea>
+          </div>
+          <div class="review-buttons">
+            <button class="btn btn-danger" id="btn-reject" onclick="app.rejectReview()">Request Changes</button>
+            <button class="btn btn-primary btn-lg" id="btn-approve" onclick="app.approveReview()">Approve &amp; Start Development</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderReviewDocuments(docs) {
+    if (!docs || Object.keys(docs).length === 0) {
+      return '<div class="review-no-docs">No documents generated yet. Planning agents may still be writing.</div>';
+    }
+
+    const sections = [];
+
+    if (docs.prd) {
+      sections.push({ title: 'PRD (Product Requirements)', icon: '&#128196;', content: docs.prd, lang: 'markdown' });
+    }
+    if (docs.stack) {
+      sections.push({ title: 'Tech Stack', icon: '&#9881;', content: docs.stack, lang: 'json' });
+    }
+    if (docs.tasks) {
+      sections.push({ title: 'Development Tasks', icon: '&#9776;', content: docs.tasks, lang: 'json' });
+    }
+    if (docs.design) {
+      sections.push({ title: 'Design Spec', icon: '&#127912;', content: docs.design, lang: 'json' });
+    }
+    if (docs.analysis) {
+      sections.push({ title: 'Code Analysis', icon: '&#128269;', content: docs.analysis, lang: 'json' });
+    }
+    if (docs.change_plan) {
+      sections.push({ title: 'Change Plan', icon: '&#128221;', content: docs.change_plan, lang: 'markdown' });
+    }
+
+    return sections.map((s, i) => `
+      <div class="review-doc">
+        <div class="review-doc-header" onclick="app.toggleReviewDoc(${i})">
+          <span class="review-doc-icon">${s.icon}</span>
+          <span class="review-doc-title">${s.title}</span>
+          <span class="review-doc-toggle" id="review-toggle-${i}">&#9660;</span>
+        </div>
+        <div class="review-doc-body" id="review-doc-${i}">
+          <pre class="review-doc-content">${escapeHtml(s.content)}</pre>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function toggleReviewDoc(index) {
+    const body = $(`review-doc-${index}`);
+    const toggle = $(`review-toggle-${index}`);
+    if (!body) return;
+    const isOpen = body.style.display !== 'none';
+    body.style.display = isOpen ? 'none' : 'block';
+    if (toggle) toggle.innerHTML = isOpen ? '&#9654;' : '&#9660;';
+  }
+
+  async function approveReview() {
+    if (!currentTeamId) return;
+    const btn = $('btn-approve');
+    if (btn) { btn.textContent = 'Approving...'; btn.disabled = true; }
+
+    try {
+      const result = await api(`/pipeline/${currentTeamId}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'approve' }),
+      });
+      if (result.success) {
+        // Refresh
+        await loadTeamDetail(currentTeamId);
+        renderTeamView();
+      } else {
+        alert(result.error || 'Failed to approve');
+      }
+    } catch (err) {
+      alert('Error: ' + err.message);
+    } finally {
+      if (btn) { btn.textContent = 'Approve & Start Development'; btn.disabled = false; }
+    }
+  }
+
+  async function rejectReview() {
+    if (!currentTeamId) return;
+    const feedback = ($('review-feedback')?.value || '').trim();
+    if (!feedback) {
+      $('review-feedback').style.borderColor = 'var(--accent-red)';
+      $('review-feedback').placeholder = 'Please provide feedback for what needs to change...';
+      $('review-feedback').focus();
+      return;
+    }
+
+    const btn = $('btn-reject');
+    if (btn) { btn.textContent = 'Sending...'; btn.disabled = true; }
+
+    try {
+      const result = await api(`/pipeline/${currentTeamId}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'reject', feedback }),
+      });
+      if (result.success) {
+        await loadTeamDetail(currentTeamId);
+        renderTeamView();
+      } else {
+        alert(result.error || 'Failed to reject');
+      }
+    } catch (err) {
+      alert('Error: ' + err.message);
+    } finally {
+      if (btn) { btn.textContent = 'Request Changes'; btn.disabled = false; }
+    }
+  }
+
   // ── Pipeline Actions ──
   function showNewPipelineModal() {
     $('modal-new-pipeline').style.display = 'flex';
@@ -821,5 +1083,8 @@ const app = (() => {
     rerunTask,
     switchView,
     selectLogAgent,
+    toggleReviewDoc,
+    approveReview,
+    rejectReview,
   };
 })();

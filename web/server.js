@@ -136,6 +136,131 @@ function getTeamDetail(teamId) {
   };
 }
 
+function getTeamReview(teamId) {
+  const teamDir = join(TEAMS_ROOT, teamId);
+  const queue = readJsonSafe(join(teamDir, 'tasks', 'queue.json'));
+  const tasks = queue?.tasks || [];
+
+  // Find the __review__ task
+  const reviewTask = tasks.find(t => t.assigned_to === '__review__');
+  if (!reviewTask) return { has_review: false };
+
+  // Check if review is pending (all dependencies completed but review itself not done)
+  const depsDone = (reviewTask.depends_on || []).every(depId => {
+    const dep = tasks.find(t => t.id === depId);
+    return dep?.status === 'completed';
+  });
+  const isPending = reviewTask.status === 'pending' && depsDone;
+  const isCompleted = reviewTask.status === 'completed';
+
+  // Read planning documents from project dir
+  const projectDirFile = join(teamDir, 'project_dir');
+  const projectDir = existsSync(projectDirFile)
+    ? readFileSync(projectDirFile, 'utf-8').trim()
+    : null;
+
+  const documents = {};
+  if (projectDir) {
+    // PRD
+    for (const name of ['prd.md', 'PRD.md']) {
+      const p = join(projectDir, name);
+      if (existsSync(p)) { documents.prd = readFileSync(p, 'utf-8'); break; }
+    }
+    // Stack
+    for (const name of ['stack.json', 'tech_stack.json']) {
+      const p = join(projectDir, name);
+      if (existsSync(p)) { documents.stack = readFileSync(p, 'utf-8'); break; }
+    }
+    // Tasks
+    for (const name of ['tasks.json', 'dev_tasks.json']) {
+      const p = join(projectDir, name);
+      if (existsSync(p)) { documents.tasks = readFileSync(p, 'utf-8'); break; }
+    }
+    // Design spec
+    for (const name of ['design_spec.json', 'design.json']) {
+      const p = join(projectDir, name);
+      if (existsSync(p)) { documents.design = readFileSync(p, 'utf-8'); break; }
+    }
+    // Modify mode docs
+    for (const name of ['analysis.json']) {
+      const p = join(projectDir, name);
+      if (existsSync(p)) { documents.analysis = readFileSync(p, 'utf-8'); break; }
+    }
+    for (const name of ['change_plan.md', 'CHANGE_PLAN.md']) {
+      const p = join(projectDir, name);
+      if (existsSync(p)) { documents.change_plan = readFileSync(p, 'utf-8'); break; }
+    }
+  }
+
+  return {
+    has_review: true,
+    review_task: reviewTask,
+    is_pending: isPending,
+    is_completed: isCompleted,
+    documents,
+  };
+}
+
+function approveReview(teamId) {
+  const teamDir = join(TEAMS_ROOT, teamId);
+  const queueFile = join(teamDir, 'tasks', 'queue.json');
+  const queue = readJsonSafe(queueFile);
+  if (!queue?.tasks) return { success: false, error: 'Queue not found' };
+
+  const reviewTask = queue.tasks.find(t => t.assigned_to === '__review__');
+  if (!reviewTask) return { success: false, error: 'No review task found' };
+  if (reviewTask.status === 'completed') return { success: false, error: 'Already approved' };
+
+  // Mark review task as completed
+  reviewTask.status = 'completed';
+  reviewTask.completed_at = new Date().toISOString();
+  reviewTask.result = 'User approved via Web UI';
+  reviewTask.owner = 'user';
+
+  try {
+    writeFileSync(queueFile, JSON.stringify(queue, null, 2));
+    return { success: true, task_id: reviewTask.id };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function rejectReview(teamId, feedback) {
+  const teamDir = join(TEAMS_ROOT, teamId);
+  const queueFile = join(teamDir, 'tasks', 'queue.json');
+  const queue = readJsonSafe(queueFile);
+  if (!queue?.tasks) return { success: false, error: 'Queue not found' };
+
+  const reviewTask = queue.tasks.find(t => t.assigned_to === '__review__');
+  if (!reviewTask) return { success: false, error: 'No review task found' };
+
+  // Find planning tasks (dependencies of the review task) and reset them
+  const planTaskIds = reviewTask.depends_on || [];
+  const resetIds = [];
+
+  for (const taskId of planTaskIds) {
+    const task = queue.tasks.find(t => t.id === taskId);
+    if (task && task.status === 'completed') {
+      task.status = 'pending';
+      task.owner = null;
+      task.completed_at = null;
+      task.result = null;
+      // Append feedback to description
+      if (feedback) {
+        task.description += `\n\n[사용자 피드백] ${feedback}`;
+      }
+      resetIds.push(taskId);
+    }
+  }
+
+  try {
+    writeFileSync(queueFile, JSON.stringify(queue, null, 2));
+    return { success: true, reset_tasks: resetIds };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 function getTeamReports(teamId) {
   const reportsDir = join(TEAMS_ROOT, teamId, 'reports');
   if (!existsSync(reportsDir)) return [];
@@ -551,6 +676,26 @@ const server = createServer(async (req, res) => {
     if (method === 'GET' && params) {
       if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
       return jsonResponse(res, { reports: getTeamReports(params.id) });
+    }
+
+    // GET /api/teams/:id/review
+    params = matchRoute(path, '/api/teams/:id/review');
+    if (method === 'GET' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      return jsonResponse(res, getTeamReview(params.id));
+    }
+
+    // POST /api/pipeline/:id/review
+    params = matchRoute(path, '/api/pipeline/:id/review');
+    if (method === 'POST' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      const body = await readBody(req);
+      if (body.action === 'approve') {
+        return jsonResponse(res, approveReview(params.id));
+      } else if (body.action === 'reject') {
+        return jsonResponse(res, rejectReview(params.id, body.feedback || ''));
+      }
+      return errorResponse(res, 'action must be "approve" or "reject"');
     }
 
     // GET /api/events/:id (SSE)

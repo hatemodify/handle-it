@@ -10,31 +10,25 @@
   <div class="app" id="app">
     <!-- Header -->
     <header class="header">
-      <div class="header-title">
-        <span>handle-it</span> Web UI
-      </div>
+      <a href="#/" class="header-title" style="text-decoration: none;">
+        <span>handle-it</span>
+      </a>
       <div class="header-actions">
         <div class="connection-status" id="connection-status">
           <div class="connection-dot" id="connection-dot"></div>
           <span id="connection-text">Connecting...</span>
         </div>
-        <button class="btn" onclick="app.showImportModal()">
-          Import Project
-        </button>
-        <button class="btn btn-primary" id="btn-new-pipeline" onclick="app.showNewPipelineModal()">
-          + New Pipeline
-        </button>
+        <button class="btn" onclick="app.showImportModal()">Import Project</button>
+        <button class="btn btn-primary" id="btn-new-pipeline" onclick="app.showNewPipelineModal()">+ New Pipeline</button>
       </div>
     </header>
 
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
       <div class="sidebar-section">
-        <div class="sidebar-label">Teams</div>
+        <div class="sidebar-label">Pipelines</div>
         <div id="team-list">
-          <div class="empty-state" style="padding: 16px;">
-            <div class="empty-state-text" style="font-size: 12px;">Loading...</div>
-          </div>
+          <div style="padding: 16px; color: var(--text-dim); font-size: 12px;">Loading...</div>
         </div>
       </div>
     </nav>
@@ -42,14 +36,15 @@
     <!-- Main Content -->
     <main class="main" id="main-content">
       <div class="empty-state">
-        <div class="empty-state-icon">&#9881;</div>
-        <div class="empty-state-text">Select a team or start a new pipeline</div>
-        <button class="btn" onclick="app.showImportModal()" style="margin-right: 8px;">
-          Import Project
-        </button>
-        <button class="btn btn-primary" onclick="app.showNewPipelineModal()">
-          + New Pipeline
-        </button>
+        <div class="empty-state-icon">&#128640;</div>
+        <div class="empty-state-text">Select a pipeline or start a new one</div>
+        <p style="color: var(--text-dim); font-size: 13px; margin-bottom: 20px;">
+          Describe your idea and handle-it will generate a complete project with PRD, architecture, code, tests, and a PR.
+        </p>
+        <div style="display: flex; gap: 8px; justify-content: center;">
+          <button class="btn" onclick="app.showImportModal()">Import Project</button>
+          <button class="btn btn-primary" onclick="app.showNewPipelineModal()">+ New Pipeline</button>
+        </div>
       </div>
     </main>
   </div>
