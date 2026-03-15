@@ -614,6 +614,17 @@ const app = (() => {
     $('input-project-dir').value = '';
   }
 
+  function showImportModal() {
+    $('modal-import').style.display = 'flex';
+    $('input-import-dir').focus();
+  }
+
+  function hideImportModal() {
+    $('modal-import').style.display = 'none';
+    $('input-import-dir').value = '';
+    $('input-import-prompt').value = '';
+  }
+
   async function startPipeline() {
     const idea = $('input-idea').value.trim();
     if (!idea) {
@@ -635,7 +646,6 @@ const app = (() => {
 
       hideNewPipelineModal();
 
-      // Refresh teams after a delay (pipeline needs time to initialize)
       setTimeout(async () => {
         await loadTeams();
         if (result.team_id) {
@@ -645,8 +655,49 @@ const app = (() => {
     } catch (err) {
       console.error('Failed to start pipeline:', err);
     } finally {
-      $('btn-start').textContent = 'Start';
+      $('btn-start').textContent = 'Create';
       $('btn-start').disabled = false;
+    }
+  }
+
+  async function startImport() {
+    const projectDir = $('input-import-dir').value.trim();
+    const prompt = $('input-import-prompt').value.trim();
+
+    if (!projectDir) {
+      $('input-import-dir').style.borderColor = 'var(--accent-red)';
+      return;
+    }
+    $('input-import-dir').style.borderColor = '';
+
+    if (!prompt) {
+      $('input-import-prompt').style.borderColor = 'var(--accent-red)';
+      return;
+    }
+    $('input-import-prompt').style.borderColor = '';
+
+    $('btn-import-start').textContent = 'Starting...';
+    $('btn-import-start').disabled = true;
+
+    try {
+      const result = await api('/pipeline/start', {
+        method: 'POST',
+        body: JSON.stringify({ idea: prompt, project_dir: projectDir }),
+      });
+
+      hideImportModal();
+
+      setTimeout(async () => {
+        await loadTeams();
+        if (result.team_id) {
+          navigate(`#/team/${result.team_id}`);
+        }
+      }, 4000);
+    } catch (err) {
+      console.error('Failed to start import:', err);
+    } finally {
+      $('btn-import-start').textContent = 'Start Modify';
+      $('btn-import-start').disabled = false;
     }
   }
 
@@ -699,11 +750,15 @@ const app = (() => {
 
   // ── Keyboard shortcuts ──
   document.addEventListener('keydown', (e) => {
-    // Escape to close modal
+    // Escape to close modals
     if (e.key === 'Escape') {
-      const modal = $('modal-new-pipeline');
-      if (modal && modal.style.display !== 'none') {
+      const modal1 = $('modal-new-pipeline');
+      if (modal1 && modal1.style.display !== 'none') {
         hideNewPipelineModal();
+      }
+      const modal2 = $('modal-import');
+      if (modal2 && modal2.style.display !== 'none') {
+        hideImportModal();
       }
     }
     // Ctrl/Cmd + N for new pipeline
@@ -720,7 +775,10 @@ const app = (() => {
   return {
     showNewPipelineModal,
     hideNewPipelineModal,
+    showImportModal,
+    hideImportModal,
     startPipeline,
+    startImport,
     stopPipeline,
     resumePipeline,
     rerunTask,

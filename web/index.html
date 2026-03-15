@@ -18,6 +18,9 @@
           <div class="connection-dot" id="connection-dot"></div>
           <span id="connection-text">Connecting...</span>
         </div>
+        <button class="btn" onclick="app.showImportModal()">
+          Import Project
+        </button>
         <button class="btn btn-primary" id="btn-new-pipeline" onclick="app.showNewPipelineModal()">
           + New Pipeline
         </button>
@@ -41,6 +44,9 @@
       <div class="empty-state">
         <div class="empty-state-icon">&#9881;</div>
         <div class="empty-state-text">Select a team or start a new pipeline</div>
+        <button class="btn" onclick="app.showImportModal()" style="margin-right: 8px;">
+          Import Project
+        </button>
         <button class="btn btn-primary" onclick="app.showNewPipelineModal()">
           + New Pipeline
         </button>
@@ -57,20 +63,44 @@
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label" for="input-idea">Idea / Modification Request</label>
-          <textarea class="form-textarea" id="input-idea" placeholder="New: AI diary app with sentiment analysis&#10;Modify: Add dark mode and Korean language support"></textarea>
+          <label class="form-label" for="input-idea">Idea</label>
+          <textarea class="form-textarea" id="input-idea" placeholder="AI diary app with sentiment analysis and dark mode..."></textarea>
         </div>
         <div class="form-group">
-          <label class="form-label" for="input-project-dir">Project Directory</label>
+          <label class="form-label" for="input-project-dir">Output Directory (optional)</label>
           <input class="form-input" id="input-project-dir" type="text" placeholder="~/projects/my-app">
-          <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
-            Existing project path = modify mode. Empty = new project.
-          </div>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="app.hideNewPipelineModal()">Cancel</button>
-        <button class="btn btn-primary" id="btn-start" onclick="app.startPipeline()">Start</button>
+        <button class="btn btn-primary" id="btn-start" onclick="app.startPipeline()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Project Modal -->
+  <div class="modal-overlay" id="modal-import" style="display: none;">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Import Project</div>
+        <button class="modal-close" onclick="app.hideImportModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="input-import-dir">Project Path</label>
+          <input class="form-input" id="input-import-dir" type="text" placeholder="~/projects/my-existing-app">
+          <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
+            Enter the path to an existing project to modify.
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="input-import-prompt">What do you want to change?</label>
+          <textarea class="form-textarea" id="input-import-prompt" rows="4" placeholder="Add dark mode support&#10;Refactor authentication to use JWT&#10;Add Korean language i18n..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="app.hideImportModal()">Cancel</button>
+        <button class="btn btn-primary" id="btn-import-start" onclick="app.startImport()">Start Modify</button>
       </div>
     </div>
   </div>
