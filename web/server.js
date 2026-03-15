@@ -296,6 +296,52 @@ function getAgentLog(teamId, agent, offset = 0, limit = 200) {
   }
 }
 
+// ── Directory browser ──
+function browseDirs(dirPath) {
+  // Resolve ~ to home directory
+  const resolved = dirPath.startsWith('~')
+    ? join(homedir(), dirPath.slice(1))
+    : dirPath;
+
+  // Security: block path traversal
+  if (resolved.includes('..')) return { error: 'Invalid path' };
+
+  if (!existsSync(resolved)) return { error: 'Path not found', path: resolved };
+
+  try {
+    const stat = statSync(resolved);
+    if (!stat.isDirectory()) return { error: 'Not a directory', path: resolved };
+
+    const entries = readdirSync(resolved, { withFileTypes: true })
+      .filter(d => {
+        // Only directories, skip hidden and node_modules
+        if (!d.isDirectory()) return false;
+        if (d.name.startsWith('.')) return false;
+        if (d.name === 'node_modules') return false;
+        return true;
+      })
+      .map(d => ({
+        name: d.name,
+        path: join(resolved, d.name),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    // Check if this dir looks like a project (has package.json, Cargo.toml, etc.)
+    const projectFiles = ['package.json', 'Cargo.toml', 'go.mod', 'pyproject.toml', 'pom.xml',
+      'Gemfile', 'requirements.txt', 'composer.json', 'build.gradle', 'Makefile', '.git'];
+    const isProject = projectFiles.some(f => existsSync(join(resolved, f)));
+
+    return {
+      path: resolved,
+      parent: dirname(resolved),
+      entries,
+      is_project: isProject,
+    };
+  } catch {
+    return { error: 'Cannot read directory', path: resolved };
+  }
+}
+
 // ── Input validation ──
 function isValidTeamId(id) {
   return /^[a-zA-Z0-9_-]+$/.test(id) && !id.includes('..');
@@ -646,6 +692,12 @@ const server = createServer(async (req, res) => {
 
   try {
     // ── API Routes ──
+
+    // GET /api/browse?path=...
+    if (method === 'GET' && path === '/api/browse') {
+      const dirPath = query.path || homedir();
+      return jsonResponse(res, browseDirs(dirPath));
+    }
 
     // GET /api/teams
     if (method === 'GET' && path === '/api/teams') {

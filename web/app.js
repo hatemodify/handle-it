@@ -457,6 +457,32 @@ const app = (() => {
           <div class="dep-graph" id="dep-graph"></div>
         </div>
       </div>
+
+      ${renderFollowUpPrompt()}
+    `;
+  }
+
+  function renderFollowUpPrompt() {
+    if (!teamDetail?.project_dir) return '';
+    const tasks = teamDetail.tasks || [];
+    const allDone = tasks.length > 0 && tasks.every(t => t.status === 'completed' || t.status === 'failed');
+    const isStopped = teamDetail.status === 'stopped' || teamDetail.status === 'completed';
+
+    if (!allDone && !isStopped) return '';
+
+    return `
+      <div class="followup-card">
+        <div class="followup-header">
+          <span class="followup-icon">&#9998;</span>
+          <span class="followup-title">Continue with changes</span>
+        </div>
+        <p class="followup-desc">Start a new modification pipeline on this project.</p>
+        <div class="followup-input-row">
+          <textarea class="form-textarea followup-textarea" id="followup-prompt" rows="2"
+            placeholder="Add dark mode toggle to settings page..."></textarea>
+          <button class="btn btn-primary" id="btn-followup" onclick="app.startFollowUp()">Run</button>
+        </div>
+      </div>
     `;
   }
 
@@ -909,9 +935,12 @@ const app = (() => {
     $('input-project-dir').value = '';
   }
 
+  // ── Folder Browser ──
+  let folderBrowserPath = '';
+
   function showImportModal() {
     $('modal-import').style.display = 'flex';
-    $('input-import-dir').focus();
+    $('input-import-prompt').focus();
   }
 
   function hideImportModal() {
@@ -919,6 +948,84 @@ const app = (() => {
     $('input-import-name').value = '';
     $('input-import-dir').value = '';
     $('input-import-prompt').value = '';
+    $('folder-browser').style.display = 'none';
+    const selected = $('folder-picker-selected');
+    if (selected) selected.innerHTML = '<span class="folder-picker-placeholder">Select a project folder...</span>';
+  }
+
+  async function openFolderBrowser() {
+    const browser = $('folder-browser');
+    if (browser.style.display !== 'none') {
+      browser.style.display = 'none';
+      return;
+    }
+    browser.style.display = 'block';
+    // Start from home dir or last browsed path
+    await browseTo(folderBrowserPath || '~');
+  }
+
+  async function browseTo(dirPath) {
+    const list = $('folder-browser-list');
+    const pathEl = $('folder-browser-path');
+    if (!list) return;
+
+    list.innerHTML = '<div style="padding: 12px; color: var(--text-dim);">Loading...</div>';
+
+    try {
+      const data = await api(`/browse?path=${encodeURIComponent(dirPath)}`);
+      if (data.error) {
+        list.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">${escapeHtml(data.error)}</div>`;
+        return;
+      }
+
+      folderBrowserPath = data.path;
+      if (pathEl) pathEl.textContent = data.path;
+
+      if (data.entries.length === 0) {
+        list.innerHTML = '<div style="padding: 12px; color: var(--text-dim);">No subdirectories</div>';
+      } else {
+        list.innerHTML = data.entries.map(e => `
+          <div class="folder-browser-item ${e.path === $('input-import-dir')?.value ? 'selected' : ''}"
+               ondblclick="app.browseTo('${escapeHtml(e.path)}')"
+               onclick="app.selectFolder('${escapeHtml(e.path)}', '${escapeHtml(e.name)}')">
+            <span class="folder-icon">&#128193;</span>
+            <span class="folder-name">${escapeHtml(e.name)}</span>
+          </div>
+        `).join('');
+      }
+
+      // If current dir is a project, offer to select it
+      if (data.is_project) {
+        const currentName = data.path.split('/').pop();
+        list.insertAdjacentHTML('beforebegin', `
+          <div class="folder-browser-current-project" onclick="app.selectFolder('${escapeHtml(data.path)}', '${escapeHtml(currentName)}')">
+            <span>&#10004;</span> This folder is a project — click to select <strong>${escapeHtml(currentName)}</strong>
+          </div>
+        `);
+      }
+    } catch (err) {
+      list.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">Error: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function folderBrowserUp() {
+    if (!folderBrowserPath) return;
+    const parent = folderBrowserPath.split('/').slice(0, -1).join('/') || '/';
+    browseTo(parent);
+  }
+
+  function selectFolder(path, name) {
+    $('input-import-dir').value = path;
+    const selected = $('folder-picker-selected');
+    if (selected) {
+      selected.innerHTML = `<span class="folder-icon">&#128193;</span> <span>${escapeHtml(path)}</span>`;
+    }
+    // Auto-fill project name if empty
+    const nameInput = $('input-import-name');
+    if (nameInput && !nameInput.value.trim()) {
+      nameInput.value = name;
+    }
+    $('folder-browser').style.display = 'none';
   }
 
   async function startPipeline() {
@@ -1031,6 +1138,45 @@ const app = (() => {
     }, 2000);
   }
 
+  // ── Follow-up ──
+  async function startFollowUp() {
+    if (!teamDetail?.project_dir) return;
+    const prompt = ($('followup-prompt')?.value || '').trim();
+    if (!prompt) {
+      $('followup-prompt').style.borderColor = 'var(--accent-red)';
+      $('followup-prompt').focus();
+      return;
+    }
+    $('followup-prompt').style.borderColor = '';
+
+    const btn = $('btn-followup');
+    if (btn) { btn.textContent = 'Starting...'; btn.disabled = true; }
+
+    // Derive project name from current team name
+    const projectName = teamDetail.team_name.replace(/_\d{8}_\d{6}$/, '');
+
+    try {
+      const result = await api('/pipeline/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          idea: prompt,
+          project_name: projectName || undefined,
+          project_dir: teamDetail.project_dir,
+        }),
+      });
+
+      setTimeout(async () => {
+        await loadTeams();
+        if (result.team_id) {
+          navigate(`#/team/${result.team_id}`);
+        }
+      }, 4000);
+    } catch (err) {
+      console.error('Failed to start follow-up:', err);
+      if (btn) { btn.textContent = 'Run'; btn.disabled = false; }
+    }
+  }
+
   // ── Init ──
   async function init() {
     await loadTeams();
@@ -1057,7 +1203,12 @@ const app = (() => {
       }
       const modal2 = $('modal-import');
       if (modal2 && modal2.style.display !== 'none') {
-        hideImportModal();
+        const fb = $('folder-browser');
+        if (fb && fb.style.display !== 'none') {
+          fb.style.display = 'none';
+        } else {
+          hideImportModal();
+        }
       }
     }
     // Ctrl/Cmd + N for new pipeline
@@ -1076,8 +1227,13 @@ const app = (() => {
     hideNewPipelineModal,
     showImportModal,
     hideImportModal,
+    openFolderBrowser,
+    browseTo,
+    folderBrowserUp,
+    selectFolder,
     startPipeline,
     startImport,
+    startFollowUp,
     stopPipeline,
     resumePipeline,
     rerunTask,

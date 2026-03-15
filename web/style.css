@@ -1006,6 +1006,155 @@ tr:hover td { background: rgba(88, 166, 255, 0.04); }
   z-index: 50;
 }
 
+/* ── Folder Picker ── */
+.folder-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.folder-picker-selected {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-primary);
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.folder-picker-placeholder {
+  color: var(--text-dim);
+}
+
+.folder-browser {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.folder-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.folder-browser-path {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.folder-browser-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.folder-browser-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: background var(--transition);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.folder-browser-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.folder-browser-item.selected {
+  background: rgba(88, 166, 255, 0.1);
+  color: var(--accent-blue);
+}
+
+.folder-icon { font-size: 15px; flex-shrink: 0; }
+
+.folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-browser-current-project {
+  padding: 8px 12px;
+  background: rgba(46, 160, 67, 0.08);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--accent-green);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.folder-browser-current-project:hover {
+  background: rgba(46, 160, 67, 0.15);
+}
+
+/* ── Follow-up Prompt ── */
+.followup-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.followup-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.followup-icon { font-size: 18px; }
+
+.followup-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.followup-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.followup-input-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.followup-textarea {
+  flex: 1;
+  min-height: 44px;
+  resize: vertical;
+}
+
+.followup-input-row .btn {
+  height: 44px;
+  padding: 0 20px;
+  flex-shrink: 0;
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

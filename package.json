@@ -1,6 +1,6 @@
 {
   "name": "@hatemodify/handle-it",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "AI-powered autonomous development pipeline — 아이디어 한 줄 → 코드 + PR 자동 완성",
   "type": "module",
   "bin": {

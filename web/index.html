@@ -79,7 +79,7 @@
 
   <!-- Import Project Modal -->
   <div class="modal-overlay" id="modal-import" style="display: none;">
-    <div class="modal">
+    <div class="modal" style="width: 560px;">
       <div class="modal-header">
         <div class="modal-title">Import Project</div>
         <button class="modal-close" onclick="app.hideImportModal()">&times;</button>
@@ -90,10 +90,20 @@
           <input class="form-input" id="input-import-name" type="text" placeholder="my-app-darkmode">
         </div>
         <div class="form-group">
-          <label class="form-label" for="input-import-dir">Project Path</label>
-          <input class="form-input" id="input-import-dir" type="text" placeholder="~/projects/my-existing-app">
-          <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
-            Enter the path to an existing project to modify.
+          <label class="form-label">Project Folder</label>
+          <div class="folder-picker">
+            <div class="folder-picker-selected" id="folder-picker-selected">
+              <span class="folder-picker-placeholder">Select a project folder...</span>
+            </div>
+            <button class="btn btn-sm" onclick="app.openFolderBrowser()">Browse</button>
+          </div>
+          <input type="hidden" id="input-import-dir">
+          <div id="folder-browser" class="folder-browser" style="display: none;">
+            <div class="folder-browser-bar">
+              <button class="btn btn-sm" onclick="app.folderBrowserUp()" id="folder-browser-up">&#8593; Up</button>
+              <div class="folder-browser-path" id="folder-browser-path"></div>
+            </div>
+            <div class="folder-browser-list" id="folder-browser-list"></div>
           </div>
         </div>
         <div class="form-group">
