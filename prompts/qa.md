@@ -9,11 +9,11 @@
 
 - **`/qa`**: 빌드 통과 후 호출. 타입 안전성, 에러 처리, 보안 취약점(XSS/인젝션/CSRF), 성능 안티패턴 체계적 감사.
   → 호출: `Skill(skill: "qa")`
-- **`/code-review`**: 전체 코드 리뷰. 구조, 네이밍, 중복, 복잡도 등 종합 점검. ⭐ 693 installs
+- **`/code-review`**: 전체 코드 리뷰. 구조, 네이밍, 중복, 복잡도 등 종합 점검.
   → 호출: `Skill(skill: "code-review")`
-- **`/code-review-quality`**: 코드 품질 심층 감사. 테스트 커버리지, 에러 처리, 보안 패턴 점검. ⭐ 376 installs
+- **`/code-review-quality`**: 코드 품질 심층 감사. 테스트 커버리지, 에러 처리, 보안 패턴 점검.
   → 호출: `Skill(skill: "code-review-quality")`
-- **`/playwright-e2e-testing`**: Playwright E2E 테스트 전문가. 셀렉터 전략, 테스트 구조, 베스트 프랙티스. ⭐ 1.2K installs
+- **`/playwright-e2e-testing`**: Playwright E2E 테스트 전문가. 셀렉터 전략, 테스트 구조, 베스트 프랙티스.
   → 호출: `Skill(skill: "playwright-e2e-testing")`
 - **`/e2e-test`**: PRD 핵심 플로우 기반 E2E 테스트 시나리오 자동 생성.
   → 호출: `Skill(skill: "e2e-test")`
@@ -21,29 +21,43 @@
   → 호출: `Skill(skill: "simplify")`
 
 ### 스킬 활용 순서
-1. 타입 체크 + 린트 + 테스트 + 빌드 (자동 수정 포함)
+1. 의존성 설치 + 타입 체크 + 린트 + 단위 테스트 + 빌드 (자동 수정 포함)
 2. `/qa` + `/code-review` + `/code-review-quality` 호출 → 보안/품질 감사
-3. `/playwright-e2e-testing` + `/e2e-test` 호출 → E2E 테스트 생성
-4. `/simplify` 호출 → 코드 간소화
-5. qa_report.md 저장
+3. `/playwright-e2e-testing` + `/e2e-test` 호출 → E2E 테스트 **생성**
+4. E2E 테스트 **실행**
+5. `/simplify` 호출 → 코드 간소화
+6. qa_report.md 저장
 
 ## 실행 순서
+
+### 0. 의존성 설치
+```bash
+cd {{PROJECT_DIR}}
+npm install 2>&1 || pnpm install 2>&1 || yarn install 2>&1
+```
+의존성이 설치되어 있지 않으면 이후 모든 단계가 실패합니다. 반드시 먼저 실행하세요.
 
 ### 1. 타입 체크
 ```bash
 cd {{PROJECT_DIR}}
 npx tsc --noEmit 2>&1
 ```
+에러 시 타입 정의를 수정하고 재실행 (최대 3회).
 
 ### 2. 린트
 ```bash
 npx eslint src/ --ext .ts,.tsx 2>&1
 ```
+에러 시 `npx eslint src/ --fix` 자동 수정 후 재실행.
 
-### 3. 테스트
+### 3. 단위 테스트
 ```bash
 npm test -- --watchAll=false --passWithNoTests 2>&1
 ```
+테스트 파일이 없으면 이 단계에서 기본 테스트를 생성하세요:
+- 유틸리티 함수 단위 테스트
+- API 핸들러 테스트
+- 주요 컴포넌트 렌더 테스트
 
 ### 4. 빌드 확인
 ```bash
@@ -57,11 +71,81 @@ npm run build 2>&1
 - **에러 처리**: 모든 async 함수에 try/catch 또는 에러 바운더리
 - **접근성**: 시맨틱 HTML, aria 속성, 키보드 네비게이션
 
-### 6. E2E 테스트 시나리오 생성 (e2e-test 스킬)
-PRD의 핵심 사용자 플로우 기반으로 E2E 테스트 작성:
-- {{PROJECT_DIR}}/e2e/ 디렉토리에 Playwright 테스트 생성
-- 최소 핵심 플로우 3가지 커버
-- 정상 경로 + 에러 경로 테스트
+### 6. E2E 테스트 생성 (playwright-e2e-testing + e2e-test 스킬)
+
+**6-1. Playwright 설치**
+```bash
+cd {{PROJECT_DIR}}
+npm install -D @playwright/test 2>&1
+npx playwright install chromium 2>&1
+```
+
+**6-2. Playwright 설정 생성**
+{{PROJECT_DIR}}/playwright.config.ts 파일 생성:
+```typescript
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  timeout: 30000,
+  use: {
+    baseURL: 'http://localhost:3000',
+    headless: true,
+  },
+  webServer: {
+    command: 'npm run dev',
+    port: 3000,
+    reuseExistingServer: true,
+    timeout: 30000,
+  },
+});
+```
+
+**6-3. E2E 테스트 작성**
+PRD(prd.md)의 핵심 사용자 플로우를 기반으로 {{PROJECT_DIR}}/e2e/ 디렉토리에 Playwright 테스트 생성:
+- `/e2e-test` 스킬 호출 → PRD 플로우 기반 테스트 시나리오 자동 생성
+- `/playwright-e2e-testing` 스킬 호출 → 셀렉터 전략, 베스트 프랙티스 적용
+- 최소 **핵심 플로우 3가지** 커버
+- 각 플로우: 정상 경로 + 에러 경로
+
+테스트 파일 예시:
+```typescript
+// e2e/home.spec.ts
+import { test, expect } from '@playwright/test';
+
+test('홈페이지 로딩', async ({ page }) => {
+  await page.goto('/');
+  await expect(page).toHaveTitle(/앱이름/);
+});
+
+test('회원가입 플로우', async ({ page }) => {
+  await page.goto('/signup');
+  await page.fill('[name="email"]', 'test@example.com');
+  await page.fill('[name="password"]', 'Test1234!');
+  await page.click('button[type="submit"]');
+  await expect(page).toHaveURL('/dashboard');
+});
+```
+
+**6-4. E2E 테스트 실행**
+```bash
+cd {{PROJECT_DIR}}
+npx playwright test --reporter=list 2>&1
+```
+실패 시:
+1. 에러 메시지 분석 (셀렉터 불일치, 타임아웃, 서버 미시작 등)
+2. 테스트 코드 또는 애플리케이션 코드 수정
+3. 재실행 (최대 3회)
+
+E2E 테스트가 `webServer` 설정으로 자동 시작이 안 되는 경우:
+```bash
+# 수동으로 서버 시작 후 테스트
+npm run build 2>&1
+npm start &
+sleep 5
+npx playwright test --reporter=list 2>&1
+kill %1 2>/dev/null || true
+```
 
 ## 자동 수정 규칙
 
@@ -77,15 +161,51 @@ PRD의 핵심 사용자 플로우 기반으로 E2E 테스트 작성:
 3. 린트 에러 → 코드 스타일 수정
 4. 테스트 실패 → 구현 또는 테스트 수정 (구현이 맞는 경우 테스트 수정)
 5. 빌드 에러 → 의존성 또는 설정 수정
-6. 보안 이슈 → 즉시 수정 (최우선)
+6. E2E 실패 → 셀렉터 수정, 대기 시간 조정, 서버 설정 확인
+7. 보안 이슈 → 즉시 수정 (최우선)
 
 ## 리포트 저장
 결과를 {{PROJECT_DIR}}/qa_report.md 로 저장:
-- 실행한 명령어와 결과
-- 발견한 이슈와 수정 내역
-- 코드 품질 감사 결과 (보안/성능/접근성)
-- E2E 테스트 커버리지
-- 최종 통과/실패 여부
+
+```markdown
+# QA Report
+
+## 1. 의존성 설치
+- [PASS/FAIL] npm install 결과
+
+## 2. 타입 체크
+- [PASS/FAIL] tsc --noEmit 결과
+- 수정 사항: ...
+
+## 3. 린트
+- [PASS/FAIL] eslint 결과
+- 수정 사항: ...
+
+## 4. 단위 테스트
+- [PASS/FAIL] 테스트 수: X개 통과 / Y개 실패
+- 수정 사항: ...
+
+## 5. 빌드
+- [PASS/FAIL] build 결과
+
+## 6. 코드 품질 감사
+- 보안: [결과 요약]
+- 성능: [결과 요약]
+- 접근성: [결과 요약]
+- 수정 사항: ...
+
+## 7. E2E 테스트
+- [PASS/FAIL] 테스트 수: X개 통과 / Y개 실패
+- 커버된 플로우:
+  1. [플로우명] — [PASS/FAIL]
+  2. [플로우명] — [PASS/FAIL]
+  3. [플로우명] — [PASS/FAIL]
+- 수정 사항: ...
+
+## 최종 결과
+- 전체: [PASS/FAIL]
+- 미해결 이슈: ...
+```
 
 완료 후 마지막 줄에 반드시:
-TASK_RESULT: QA 완료 — 타입:[결과] 린트:[결과] 테스트:[결과] 빌드:[결과] 보안:[결과] E2E:[결과]
+TASK_RESULT: QA 완료 — 타입:[PASS/FAIL] 린트:[PASS/FAIL] 단위테스트:[N개통과] 빌드:[PASS/FAIL] 보안:[결과] E2E:[N개통과/M개실패]

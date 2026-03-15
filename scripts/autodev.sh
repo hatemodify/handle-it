@@ -259,28 +259,22 @@ step_register_tasks() {
         "$AUTODEV_PROMPTS/architect.md") — 태스크 분해 단계만 실행" \
       "$T_PRD,$T_STACK" "architect")
 
-    # ── Phase 3: 태스크 분해 완료 후 ──
+    # ── Phase 3: 태스크 분해 완료 후 (tasks.json 기반 동적 실행) ──
     T_SETUP=$(tq_add "$queue" \
       "프로젝트 초기 세팅" \
-      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 기술스택으로 프로젝트 초기화. package.json, tsconfig, eslint, tailwind 설정|g" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 기술스택으로 프로젝트 초기화. package.json, tsconfig, eslint, tailwind 설정. tasks.json의 Phase 1 태스크를 모두 실행.|g" \
         "$AUTODEV_PROMPTS/developer.md")" \
       "$T_TASKS" "dev1")
 
-    T_AUTH=$(tq_add "$queue" \
-      "인증 시스템 구현" \
-      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 auth 스택으로 로그인/회원가입 구현. 소셜 로그인 포함|g" \
+    T_CORE=$(tq_add "$queue" \
+      "백엔드/로직 구현" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|tasks.json을 읽고 백엔드, API, 데이터베이스, 인증 등 로직 관련 태스크를 순서대로 모두 구현. PRD의 P0 기능 우선.|g" \
         "$AUTODEV_PROMPTS/developer.md")" \
       "$T_SETUP" "dev1")
 
-    T_CORE=$(tq_add "$queue" \
-      "핵심 기능 구현" \
-      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|prd.md의 P0 기능 구현. 각 기능은 독립 컴포넌트로 분리|g" \
-        "$AUTODEV_PROMPTS/developer.md")" \
-      "$T_AUTH" "dev1")
-
     T_UI=$(tq_add "$queue" \
-      "UI 컴포넌트 구현" \
-      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|design_spec.json 기반 공통 UI 컴포넌트 구현. Button, Card, Input, Modal, Navigation|g" \
+      "프론트엔드/UI 구현" \
+      "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|tasks.json을 읽고 프론트엔드, UI 컴포넌트, 페이지, 레이아웃, 스타일링 관련 태스크를 순서대로 모두 구현. design_spec.json 참조.|g" \
         "$AUTODEV_PROMPTS/developer.md")" \
       "$T_DESIGN,$T_SETUP" "dev2")
 
@@ -297,7 +291,7 @@ step_register_tasks() {
         "$AUTODEV_PROMPTS/git.md")" \
       "$T_QA" "git" > /dev/null
 
-    log_success "태스크 등록 완료 (총 9개)"
+    log_success "태스크 등록 완료 (총 8개)"
   fi
 
   # DAG 의존성 순환 검증
