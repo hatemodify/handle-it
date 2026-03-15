@@ -328,13 +328,14 @@ const app = (() => {
           <div class="card-header"><span class="card-title">Tasks</span></div>
           <div class="card-body" style="padding: 0;">
             <table>
-              <thead><tr><th>Status</th><th>ID</th><th>Task</th><th>Agent</th><th></th></tr></thead>
+              <thead><tr><th>Status</th><th>ID</th><th>Task</th><th>Assigned</th><th>Owner</th><th></th></tr></thead>
               <tbody>
                 ${tasks.map(t => `
                   <tr>
                     <td class="status-${t.status}"><span class="status-dot"></span><span class="status-text">${t.status}</span></td>
                     <td style="font-family: var(--font-mono); font-size: 12px;">${escapeHtml(t.id)}</td>
                     <td>${escapeHtml(t.subject)}</td>
+                    <td style="color: var(--text-dim); font-size: 12px;">${escapeHtml(t.assigned_to || 'any')}</td>
                     <td style="color: var(--accent-purple);">${escapeHtml(t.owner || '-')}</td>
                     <td>${t.status === 'failed' || t.status === 'completed' ?
                       `<button class="btn btn-sm" onclick="app.rerunTask('${teamDetail.id}', '${t.id}')">Rerun</button>` : ''
@@ -368,11 +369,27 @@ const app = (() => {
     if (container) container.innerHTML = renderAgentCardsHTML();
   }
 
+  function getAgentTasks(agentName) {
+    const tasks = teamDetail?.tasks || [];
+    const assigned = tasks.filter(t => t.assigned_to === agentName);
+    const owned = tasks.filter(t => t.owner === agentName);
+    const current = tasks.find(t => t.owner === agentName && t.status === 'in_progress');
+    const completed = owned.filter(t => t.status === 'completed');
+    const failed = owned.filter(t => t.status === 'failed');
+    return { assigned, current, completed, failed };
+  }
+
   function renderAgentCardsHTML() {
     const agents = teamDetail?.agents || [];
     if (agents.length === 0) return '<div style="color: var(--text-dim); font-size: 13px;">No agents</div>';
 
-    return `<div class="agents-grid">${agents.map(a => `
+    return `<div class="agents-grid">${agents.map(a => {
+      const { assigned, current, completed, failed } = getAgentTasks(a.name);
+      const totalAssigned = assigned.length;
+      const doneCount = completed.length;
+      const failCount = failed.length;
+
+      return `
       <div class="agent-card ${a.alive ? 'alive' : 'dead'}">
         <div class="agent-name">${escapeHtml(a.name)}</div>
         <div class="agent-role">${escapeHtml(a.role || '')}</div>
@@ -380,8 +397,23 @@ const app = (() => {
           ${a.alive ? '&#9679; alive' : '&#9675; stopped'}
           ${(a.respawn_count || 0) > 0 ? ` (respawn: ${a.respawn_count})` : ''}
         </div>
-      </div>
-    `).join('')}</div>`;
+        ${current ? `
+          <div class="agent-current-task">
+            <span class="agent-task-icon">&#9654;</span>
+            <span>${escapeHtml(current.id)}: ${escapeHtml(current.subject)}</span>
+          </div>
+        ` : ''}
+        ${totalAssigned > 0 ? `
+          <div class="agent-task-summary">
+            <span class="agent-task-count done">${doneCount}</span>/<span class="agent-task-count total">${totalAssigned}</span> tasks
+            ${failCount > 0 ? `<span class="agent-task-count fail">${failCount} failed</span>` : ''}
+          </div>
+          <div class="agent-task-list">
+            ${assigned.map(t => `<div class="agent-task-item status-${t.status}"><span class="status-dot"></span>${escapeHtml(t.id)}</div>`).join('')}
+          </div>
+        ` : ''}
+      </div>`;
+    }).join('')}</div>`;
   }
 
   // ── Dependency Graph (SVG) ──

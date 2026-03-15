@@ -352,6 +352,61 @@ tr:hover td { background: rgba(88, 166, 255, 0.04); }
 .agent-alive { color: var(--accent-green); }
 .agent-dead { color: var(--accent-red); }
 
+.agent-current-task {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(88, 166, 255, 0.1);
+  border: 1px solid rgba(88, 166, 255, 0.3);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--accent-blue);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-task-icon {
+  font-size: 9px;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.agent-task-summary {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.agent-task-count.done { color: var(--accent-green); font-weight: 600; }
+.agent-task-count.total { color: var(--text-secondary); }
+.agent-task-count.fail { color: var(--accent-red); margin-left: 6px; font-size: 10px; }
+
+.agent-task-list {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.agent-task-item {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-task-item .status-dot { width: 6px; height: 6px; }
+
 /* ── Dependency Graph ── */
 .dep-graph {
   width: 100%;
