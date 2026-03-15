@@ -31,7 +31,15 @@ source "$AUTODEV_ROOT/lib/team_manager.sh"
 IDEA="${1:?'사용법: autodev.sh <아이디어> [프로젝트_경로]'}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 PROJECT_DIR="${2:-$HOME/projects/autodev_$TIMESTAMP}"
-TEAM_NAME="ad_$TIMESTAMP"
+
+# 프로젝트명: 환경변수 → 경로에서 추출 → 기본값
+if [ -n "${AUTODEV_PROJECT_NAME:-}" ]; then
+  # 특수문자 제거 (파일명 안전)
+  SAFE_NAME=$(echo "$AUTODEV_PROJECT_NAME" | sed 's/[^a-zA-Z0-9가-힣_-]/_/g' | head -c 50)
+  TEAM_NAME="${SAFE_NAME}_${TIMESTAMP}"
+else
+  TEAM_NAME="ad_$TIMESTAMP"
+fi
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 
 # ── 입력 검증 ──

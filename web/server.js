@@ -325,7 +325,7 @@ function setupSSE(res, teamId) {
 // ── Pipeline actions ──
 const runningPipelines = new Map();
 
-function startPipeline(idea, projectDir) {
+function startPipeline(idea, projectDir, projectName) {
   return new Promise((resolve, reject) => {
     const configPath = join(process.cwd(), 'handle-it.config.json');
     let config = {};
@@ -345,6 +345,7 @@ function startPipeline(idea, projectDir) {
       AUTODEV_TASK_TIMEOUT: String(config.task_timeout || 900),
       CLAUDE_BIN: config.claude_bin || process.env.CLAUDE_BIN || 'claude',
       AUTODEV_MODEL: config.model || process.env.AUTODEV_MODEL || '',
+      AUTODEV_PROJECT_NAME: projectName || '',
       AUTODEV_AGENTS: (config.agents || []).join(','),
     };
 
@@ -571,7 +572,7 @@ const server = createServer(async (req, res) => {
       if (body.idea.length > 1000) {
         return errorResponse(res, 'idea too long (max 1000 chars)');
       }
-      const result = await startPipeline(body.idea.trim(), body.project_dir || null);
+      const result = await startPipeline(body.idea.trim(), body.project_dir || null, body.project_name || null);
       return jsonResponse(res, result);
     }
 

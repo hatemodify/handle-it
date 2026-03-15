@@ -642,6 +642,7 @@ const app = (() => {
 
   function hideNewPipelineModal() {
     $('modal-new-pipeline').style.display = 'none';
+    $('input-name').value = '';
     $('input-idea').value = '';
     $('input-project-dir').value = '';
   }
@@ -653,6 +654,7 @@ const app = (() => {
 
   function hideImportModal() {
     $('modal-import').style.display = 'none';
+    $('input-import-name').value = '';
     $('input-import-dir').value = '';
     $('input-import-prompt').value = '';
   }
@@ -665,6 +667,7 @@ const app = (() => {
     }
     $('input-idea').style.borderColor = '';
 
+    const projectName = $('input-name').value.trim() || undefined;
     const projectDir = $('input-project-dir').value.trim() || undefined;
 
     $('btn-start').textContent = 'Starting...';
@@ -673,7 +676,7 @@ const app = (() => {
     try {
       const result = await api('/pipeline/start', {
         method: 'POST',
-        body: JSON.stringify({ idea, project_dir: projectDir }),
+        body: JSON.stringify({ idea, project_name: projectName, project_dir: projectDir }),
       });
 
       hideNewPipelineModal();
@@ -711,10 +714,12 @@ const app = (() => {
     $('btn-import-start').textContent = 'Starting...';
     $('btn-import-start').disabled = true;
 
+    const projectName = $('input-import-name').value.trim() || undefined;
+
     try {
       const result = await api('/pipeline/start', {
         method: 'POST',
-        body: JSON.stringify({ idea: prompt, project_dir: projectDir }),
+        body: JSON.stringify({ idea: prompt, project_name: projectName, project_dir: projectDir }),
       });
 
       hideImportModal();

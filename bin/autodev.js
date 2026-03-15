@@ -94,6 +94,7 @@ if (command === 'init') {
     timeout: 7200,
     claude_bin: "claude",
     model: null,
+    project_name: null,
     project_dir: null,
     prompts_dir: null,
     _comment: "model: Claude 모델 (예: claude-sonnet-4-20250514). prompts_dir: 커스텀 프롬프트 경로 (null=기본값)"
@@ -546,6 +547,7 @@ const env = {
   AUTODEV_HEALTH_INTERVAL: String(config.health_interval || 5),
   AUTODEV_TASK_TIMEOUT:    String(config.task_timeout || 900),
   AUTODEV_MODEL:     config.model || process.env.AUTODEV_MODEL || '',
+  AUTODEV_PROJECT_NAME: config.project_name || process.env.AUTODEV_PROJECT_NAME || '',
   AUTODEV_AGENTS:    (config.agents || []).join(','),
 };
 
