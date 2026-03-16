@@ -37,13 +37,13 @@
     <main class="main" id="main-content">
       <div class="empty-state">
         <div class="empty-state-icon">&#128640;</div>
-        <div class="empty-state-text">Select a pipeline or start a new one</div>
-        <p style="color: var(--text-dim); font-size: 13px; margin-bottom: 20px;">
-          Describe your idea and handle-it will generate a complete project with PRD, architecture, code, tests, and a PR.
-        </p>
-        <div style="display: flex; gap: 8px; justify-content: center;">
+        <div class="empty-state-text">Get started</div>
+        <div class="empty-state-desc">
+          Describe your idea and handle-it will generate PRD, architecture, code, tests, and a PR &mdash; all autonomously.
+        </div>
+        <div style="display: flex; gap: 10px; justify-content: center;">
           <button class="btn" onclick="app.showImportModal()">Import Project</button>
-          <button class="btn btn-primary" onclick="app.showNewPipelineModal()">+ New Pipeline</button>
+          <button class="btn btn-primary btn-lg" onclick="app.showNewPipelineModal()">+ New Pipeline</button>
         </div>
       </div>
     </main>

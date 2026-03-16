@@ -249,13 +249,13 @@ const app = (() => {
       renderMain(`
         <div class="empty-state">
           <div class="empty-state-icon">&#128640;</div>
-          <div class="empty-state-text">No pipelines yet</div>
-          <p style="color: var(--text-dim); font-size: 13px; margin-bottom: 20px;">
-            Start a new pipeline from an idea, or import an existing project to modify.
-          </p>
-          <div style="display: flex; gap: 8px; justify-content: center;">
+          <div class="empty-state-text">Get started</div>
+          <div class="empty-state-desc">
+            Describe your idea and handle-it will generate PRD, architecture, code, tests, and a PR &mdash; all autonomously.
+          </div>
+          <div style="display: flex; gap: 10px; justify-content: center;">
             <button class="btn" onclick="app.showImportModal()">Import Project</button>
-            <button class="btn btn-primary" onclick="app.showNewPipelineModal()">+ New Pipeline</button>
+            <button class="btn btn-primary btn-lg" onclick="app.showNewPipelineModal()">+ New Pipeline</button>
           </div>
         </div>
       `);
@@ -263,15 +263,21 @@ const app = (() => {
       const active = teams.filter(t => t.status === 'active');
       const inactive = teams.filter(t => t.status !== 'active');
 
-      let html = '';
+      let html = `<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+        <h2 style="color: var(--text-primary); font-size: 20px; font-weight: 800; letter-spacing: -0.3px;">Dashboard</h2>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-sm" onclick="app.showImportModal()">Import</button>
+          <button class="btn btn-primary btn-sm" onclick="app.showNewPipelineModal()">+ New</button>
+        </div>
+      </div>`;
 
       if (active.length > 0) {
-        html += `<div class="section-label">Active Pipelines</div>`;
+        html += `<div class="section-label">Active</div>`;
         html += `<div class="grid-2">${active.map(renderTeamCard).join('')}</div>`;
       }
 
       if (inactive.length > 0) {
-        html += `<div class="section-label" style="margin-top: 24px;">History</div>`;
+        html += `<div class="section-label" style="margin-top: 28px;">History</div>`;
         html += `<div class="grid-2">${inactive.map(renderTeamCard).join('')}</div>`;
       }
 
@@ -494,30 +500,33 @@ const app = (() => {
         </div>
       </div>
 
-      ${renderFollowUpPrompt()}
+      ${renderPromptCard()}
     `;
   }
 
-  function renderFollowUpPrompt() {
+  function renderPromptCard() {
     if (!teamDetail?.project_dir) return '';
-    const tasks = teamDetail.tasks || [];
-    const allDone = tasks.length > 0 && tasks.every(t => t.status === 'completed' || t.status === 'failed');
-    const isStopped = teamDetail.status === 'stopped' || teamDetail.status === 'completed';
-
-    if (!allDone && !isStopped) return '';
+    const isRunning = teamDetail.status === 'active';
+    const dirName = teamDetail.project_dir.split('/').pop() || teamDetail.project_dir;
 
     return `
-      <div class="followup-card">
-        <div class="followup-header">
-          <span class="followup-icon">&#9998;</span>
-          <span class="followup-title">Continue with changes</span>
+      <div class="prompt-card">
+        <div class="prompt-header">
+          <span class="prompt-icon">&#9889;</span>
+          <span class="prompt-title">Send a prompt</span>
         </div>
-        <p class="followup-desc">Start a new modification pipeline on this project.</p>
-        <div class="followup-input-row">
-          <textarea class="form-textarea followup-textarea" id="followup-prompt" rows="2"
-            placeholder="Add dark mode toggle to settings page..."></textarea>
-          <button class="btn btn-primary" id="btn-followup" onclick="app.startFollowUp()">Run</button>
+        <p class="prompt-desc">${isRunning
+          ? 'Pipeline is running. Queue a new modification to start after completion.'
+          : 'Describe what you want to change — a new pipeline will start on this project.'
+        }</p>
+        <div class="prompt-input-row">
+          <textarea class="form-textarea prompt-textarea" id="prompt-input" rows="2"
+            placeholder="Add dark mode toggle, refactor auth to JWT, add i18n support..."></textarea>
+          <button class="btn btn-primary" id="btn-send-prompt" onclick="app.sendPrompt()">
+            ${isRunning ? 'Queue' : 'Run'}
+          </button>
         </div>
+        <div class="prompt-project-dir">&#128193; ${escapeHtml(dirName)}</div>
       </div>
     `;
   }
@@ -1216,21 +1225,21 @@ const app = (() => {
     }, 2000);
   }
 
-  // ── Follow-up ──
-  async function startFollowUp() {
+  // ── Send Prompt ──
+  async function sendPrompt() {
     if (!teamDetail?.project_dir) return;
-    const prompt = ($('followup-prompt')?.value || '').trim();
+    const prompt = ($('prompt-input')?.value || '').trim();
     if (!prompt) {
-      $('followup-prompt').style.borderColor = 'var(--accent-red)';
-      $('followup-prompt').focus();
+      $('prompt-input').style.borderColor = 'var(--accent-red)';
+      $('prompt-input').focus();
+      showToast('Please enter a prompt', 'error');
       return;
     }
-    $('followup-prompt').style.borderColor = '';
+    $('prompt-input').style.borderColor = '';
 
-    const btn = $('btn-followup');
+    const btn = $('btn-send-prompt');
     if (btn) { btn.textContent = 'Starting...'; btn.disabled = true; }
 
-    // Derive project name from current team name
     const projectName = teamDetail.team_name.replace(/_\d{8}_\d{6}$/, '');
 
     try {
@@ -1243,14 +1252,13 @@ const app = (() => {
         }),
       });
 
-      setTimeout(async () => {
-        await loadTeams();
-        if (result.team_id) {
-          navigate(`#/team/${result.team_id}`);
-        }
-      }, 4000);
+      showToast('New pipeline started', 'success');
+      $('prompt-input').value = '';
+
+      await waitForTeamAndNavigate(result.team_id);
     } catch (err) {
-      console.error('Failed to start follow-up:', err);
+      showToast('Failed to start pipeline', 'error');
+    } finally {
       if (btn) { btn.textContent = 'Run'; btn.disabled = false; }
     }
   }
@@ -1311,7 +1319,7 @@ const app = (() => {
     selectFolder,
     startPipeline,
     startImport,
-    startFollowUp,
+    sendPrompt,
     stopPipeline,
     deletePipeline,
     resumePipeline,

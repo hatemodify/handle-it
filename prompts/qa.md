@@ -71,7 +71,19 @@ npm run build 2>&1
 - **에러 처리**: 모든 async 함수에 try/catch 또는 에러 바운더리
 - **접근성**: 시맨틱 HTML, aria 속성, 키보드 네비게이션
 
-### 6. E2E 테스트 생성 (playwright-e2e-testing + e2e-test 스킬)
+### 6. E2E 테스트 (필수 — 반드시 실행)
+
+> **⚠️ 이 단계는 생략 불가. 실제 개발 결과물을 기반으로 E2E 테스트를 작성하고 실행해야 합니다.**
+
+**6-0. 개발 결과물 파악 (E2E 작성 전 필수)**
+테스트를 작성하기 전에 반드시 아래를 확인하세요:
+1. `{{PROJECT_DIR}}/` 내 실제 생성된 파일 목록 확인 (`ls -la`, `find . -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js"`)
+2. `reports/` 폴더의 개발자 에이전트 보고서 읽기 — 어떤 컴포넌트/API/페이지가 실제로 구현되었는지 파악
+3. 라우트 구조 확인 (`src/app/`, `src/pages/`, `src/routes/` 등)
+4. 실제 존재하는 버튼, 폼, 링크의 텍스트/셀렉터 확인
+5. `package.json`의 `scripts` 섹션 확인 → dev 서버 실행 명령어 파악
+
+**테스트는 PRD의 "이상적" 플로우가 아니라, 실제 구현된 코드를 기반으로 작성해야 합니다.**
 
 **6-1. Playwright 설치**
 ```bash
@@ -81,71 +93,62 @@ npx playwright install chromium 2>&1
 ```
 
 **6-2. Playwright 설정 생성**
-{{PROJECT_DIR}}/playwright.config.ts 파일 생성:
+`{{PROJECT_DIR}}/playwright.config.ts` 생성 — **dev 서버 포트와 명령어는 package.json에서 확인한 값을 사용**:
 ```typescript
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
   timeout: 30000,
+  retries: 1,
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://localhost:3000', // ← 실제 dev 서버 포트로 수정
     headless: true,
+    screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'npm run dev',
-    port: 3000,
+    command: 'npm run dev', // ← 실제 dev 명령어로 수정
+    port: 3000,             // ← 실제 포트로 수정
     reuseExistingServer: true,
     timeout: 30000,
   },
 });
 ```
 
-**6-3. E2E 테스트 작성**
-PRD(prd.md)의 핵심 사용자 플로우를 기반으로 {{PROJECT_DIR}}/e2e/ 디렉토리에 Playwright 테스트 생성:
-- `/e2e-test` 스킬 호출 → PRD 플로우 기반 테스트 시나리오 자동 생성
+**6-3. E2E 테스트 작성 (실제 구현 기반)**
+`{{PROJECT_DIR}}/e2e/` 디렉토리에 Playwright 테스트 생성:
+- `/e2e-test` 스킬 호출 → 실제 구현된 플로우 기반 테스트 시나리오 생성
 - `/playwright-e2e-testing` 스킬 호출 → 셀렉터 전략, 베스트 프랙티스 적용
+- **실제 코드를 읽고** 존재하는 요소의 셀렉터를 사용 (getByRole, getByText, data-testid 등)
 - 최소 **핵심 플로우 3가지** 커버
 - 각 플로우: 정상 경로 + 에러 경로
 
-테스트 파일 예시:
-```typescript
-// e2e/home.spec.ts
-import { test, expect } from '@playwright/test';
+테스트 작성 원칙:
+1. **실제 존재하는 페이지/컴포넌트만 테스트** — 구현 안 된 기능은 테스트하지 않음
+2. **실제 텍스트/셀렉터 사용** — 소스 코드에서 버튼 텍스트, placeholder, label 확인 후 사용
+3. **빌드 후 동작 확인** — `npm run build && npm start`로 프로덕션 빌드도 확인
 
-test('홈페이지 로딩', async ({ page }) => {
-  await page.goto('/');
-  await expect(page).toHaveTitle(/앱이름/);
-});
-
-test('회원가입 플로우', async ({ page }) => {
-  await page.goto('/signup');
-  await page.fill('[name="email"]', 'test@example.com');
-  await page.fill('[name="password"]', 'Test1234!');
-  await page.click('button[type="submit"]');
-  await expect(page).toHaveURL('/dashboard');
-});
-```
-
-**6-4. E2E 테스트 실행**
+**6-4. E2E 테스트 실행 (필수)**
 ```bash
 cd {{PROJECT_DIR}}
 npx playwright test --reporter=list 2>&1
 ```
 실패 시:
 1. 에러 메시지 분석 (셀렉터 불일치, 타임아웃, 서버 미시작 등)
-2. 테스트 코드 또는 애플리케이션 코드 수정
+2. **실제 애플리케이션 소스를 다시 읽고** 올바른 셀렉터/URL로 테스트 수정
 3. 재실행 (최대 3회)
 
-E2E 테스트가 `webServer` 설정으로 자동 시작이 안 되는 경우:
+`webServer` 설정으로 자동 시작이 안 되는 경우:
 ```bash
-# 수동으로 서버 시작 후 테스트
 npm run build 2>&1
 npm start &
 sleep 5
 npx playwright test --reporter=list 2>&1
 kill %1 2>/dev/null || true
 ```
+
+**6-5. E2E 테스트 미실행 시 QA는 FAIL 처리**
+E2E 테스트를 실행하지 않거나 0개 테스트로 통과시키면 QA 전체가 FAIL입니다.
 
 ## 자동 수정 규칙
 
@@ -209,3 +212,5 @@ kill %1 2>/dev/null || true
 
 완료 후 마지막 줄에 반드시:
 TASK_RESULT: QA 완료 — 타입:[PASS/FAIL] 린트:[PASS/FAIL] 단위테스트:[N개통과] 빌드:[PASS/FAIL] 보안:[결과] E2E:[N개통과/M개실패]
+
+**⚠️ E2E 테스트가 0개이거나 미실행이면 전체 결과를 FAIL로 보고하세요.**
