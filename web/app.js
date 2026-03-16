@@ -41,6 +41,8 @@ const app = (() => {
       currentTeamId = null;
       teamDetail = null;
       currentView = 'overview';
+      if (eventSource) { eventSource.close(); eventSource = null; }
+      setConnectionStatus(null); // idle
       renderHome();
     }
   }
@@ -152,8 +154,17 @@ const app = (() => {
   function setConnectionStatus(connected) {
     const dot = document.getElementById('connection-dot');
     const text = document.getElementById('connection-text');
-    if (dot) dot.className = connected ? 'connection-dot' : 'connection-dot disconnected';
-    if (text) text.textContent = connected ? 'Connected' : 'Disconnected';
+    if (!dot || !text) return;
+    if (connected === null) {
+      dot.className = 'connection-dot idle';
+      text.textContent = '';
+    } else if (connected) {
+      dot.className = 'connection-dot';
+      text.textContent = 'Live';
+    } else {
+      dot.className = 'connection-dot disconnected';
+      text.textContent = 'Disconnected';
+    }
   }
 
   // ── Rendering Helpers ──
@@ -168,6 +179,30 @@ const app = (() => {
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+
+  // ── Toast Notifications ──
+  function showToast(message, type = 'info') {
+    let container = $('toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toast-container';
+      container.className = 'toast-container';
+      document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    // Auto-remove
+    setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; }, 3000);
+    setTimeout(() => toast.remove(), 3500);
+  }
+
+  // ── Modal overlay click-to-close ──
+  document.addEventListener('click', (e) => {
+    if (e.target.id === 'modal-new-pipeline') hideNewPipelineModal();
+    if (e.target.id === 'modal-import') hideImportModal();
+  });
 
   // ── Sidebar ──
   function renderSidebar() {
@@ -984,12 +1019,12 @@ const app = (() => {
       folderBrowserPath = data.path;
       if (pathEl) pathEl.textContent = data.path;
 
-      // Folder list — click navigates into subfolder
+      // Folder list — click navigates into subfolder (use data attributes to avoid escaping issues)
       if (data.entries.length === 0) {
         list.innerHTML = '<div style="padding: 12px; color: var(--text-dim);">No subdirectories</div>';
       } else {
         list.innerHTML = data.entries.map(e => `
-          <div class="folder-browser-item" onclick="app.browseTo('${escapeHtml(e.path)}')">
+          <div class="folder-browser-item" data-path="${encodeURIComponent(e.path)}">
             <span class="folder-icon">&#128193;</span>
             <span class="folder-name">${escapeHtml(e.name)}</span>
             ${e.is_project ? '<span class="folder-project-hint">project</span>' : ''}
@@ -997,15 +1032,21 @@ const app = (() => {
         `).join('');
       }
 
+      // Attach click handlers via event delegation (avoids quote/path escaping issues)
+      list.onclick = (e) => {
+        const item = e.target.closest('.folder-browser-item');
+        if (item?.dataset.path) browseTo(decodeURIComponent(item.dataset.path));
+      };
+
       // Footer — select current folder button
       if (footer) {
         const currentName = data.path.split('/').pop() || data.path;
         footer.innerHTML = `
-          <button class="btn btn-primary btn-sm folder-select-btn"
-            onclick="app.selectFolder('${escapeHtml(data.path)}', '${escapeHtml(currentName)}')">
+          <button class="btn btn-primary btn-sm folder-select-btn" id="folder-select-current">
             Select this folder${data.is_project ? ' (project detected)' : ''}
           </button>
         `;
+        $('folder-select-current').onclick = () => selectFolder(data.path, currentName);
       }
     } catch (err) {
       list.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">Error: ${escapeHtml(err.message)}</div>`;
@@ -1030,12 +1071,15 @@ const app = (() => {
       nameInput.value = name;
     }
     $('folder-browser').style.display = 'none';
+    showToast('Folder selected: ' + name);
   }
 
   async function startPipeline() {
     const idea = $('input-idea').value.trim();
     if (!idea) {
       $('input-idea').style.borderColor = 'var(--accent-red)';
+      $('input-idea').focus();
+      showToast('Please enter an idea', 'error');
       return;
     }
     $('input-idea').style.borderColor = '';
@@ -1053,19 +1097,34 @@ const app = (() => {
       });
 
       hideNewPipelineModal();
+      showToast('Pipeline started');
 
-      setTimeout(async () => {
-        await loadTeams();
-        if (result.team_id) {
-          navigate(`#/team/${result.team_id}`);
-        }
-      }, 4000);
+      // Poll until team appears, then navigate
+      await waitForTeamAndNavigate(result.team_id);
     } catch (err) {
-      console.error('Failed to start pipeline:', err);
+      showToast('Failed to start pipeline', 'error');
     } finally {
       $('btn-start').textContent = 'Create';
       $('btn-start').disabled = false;
     }
+  }
+
+  async function waitForTeamAndNavigate(teamId) {
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      await loadTeams();
+      if (teamId && teams.some(t => t.id === teamId)) {
+        navigate(`#/team/${teamId}`);
+        return;
+      }
+      // If no teamId, check for any new team
+      if (!teamId && teams.length > 0) {
+        navigate(`#/team/${teams[0].id}`);
+        return;
+      }
+    }
+    // Fallback
+    if (teamId) navigate(`#/team/${teamId}`);
   }
 
   async function startImport() {
@@ -1073,13 +1132,16 @@ const app = (() => {
     const prompt = $('input-import-prompt').value.trim();
 
     if (!projectDir) {
-      $('input-import-dir').style.borderColor = 'var(--accent-red)';
+      $('folder-picker-selected').style.borderColor = 'var(--accent-red)';
+      showToast('Please select a project folder', 'error');
       return;
     }
-    $('input-import-dir').style.borderColor = '';
+    $('folder-picker-selected').style.borderColor = '';
 
     if (!prompt) {
       $('input-import-prompt').style.borderColor = 'var(--accent-red)';
+      $('input-import-prompt').focus();
+      showToast('Please describe what you want to change', 'error');
       return;
     }
     $('input-import-prompt').style.borderColor = '';
@@ -1096,15 +1158,11 @@ const app = (() => {
       });
 
       hideImportModal();
+      showToast('Modify pipeline started');
 
-      setTimeout(async () => {
-        await loadTeams();
-        if (result.team_id) {
-          navigate(`#/team/${result.team_id}`);
-        }
-      }, 4000);
+      await waitForTeamAndNavigate(result.team_id);
     } catch (err) {
-      console.error('Failed to start import:', err);
+      showToast('Failed to start import', 'error');
     } finally {
       $('btn-import-start').textContent = 'Start Modify';
       $('btn-import-start').disabled = false;
@@ -1114,6 +1172,7 @@ const app = (() => {
   async function stopPipeline(teamId) {
     if (!confirm('Stop this pipeline? Running agents will be terminated.')) return;
     await api(`/pipeline/${teamId}/stop`, { method: 'POST' });
+    showToast('Pipeline stopped');
     // Immediately update local state so UI reflects the change
     if (teamDetail) {
       teamDetail.status = 'stopped';
@@ -1131,6 +1190,7 @@ const app = (() => {
     const name = teamDetail?.team_name || teamId;
     if (!confirm(`Delete pipeline "${name}"?\nThis removes all team data (logs, reports, queue). Project source files are not affected.`)) return;
     await api(`/pipeline/${teamId}/delete`, { method: 'POST' });
+    showToast('Pipeline deleted');
     currentTeamId = null;
     teamDetail = null;
     await loadTeams();
@@ -1139,16 +1199,20 @@ const app = (() => {
 
   async function resumePipeline(teamId) {
     await api(`/pipeline/${teamId}/resume`, { method: 'POST' });
-    setTimeout(() => {
-      loadTeamDetail(teamId).then(() => renderTeamView());
+    showToast('Pipeline resumed');
+    setTimeout(async () => {
+      await loadTeamDetail(teamId);
+      renderTeamView();
     }, 2000);
   }
 
   async function rerunTask(teamId, taskId) {
     if (!confirm(`Rerun task ${taskId}?`)) return;
     await api(`/pipeline/${teamId}/rerun/${taskId}`, { method: 'POST' });
-    setTimeout(() => {
-      loadTeamDetail(teamId).then(() => renderTeamView());
+    showToast('Task rerun started');
+    setTimeout(async () => {
+      await loadTeamDetail(teamId);
+      renderTeamView();
     }, 2000);
   }
 
