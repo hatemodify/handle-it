@@ -872,13 +872,27 @@ const app = (() => {
     }
 
     if (!reviewData.is_pending) {
-      container.innerHTML = `
-        <div class="review-waiting">
-          <div class="loading-spinner"></div>
-          <div class="review-waiting-text">Waiting for planning phase to complete...</div>
-          <div class="review-waiting-sub">The review will be available once PRD, architecture, and task breakdown are finished.</div>
-        </div>
-      `;
+      if (reviewData.is_rejected) {
+        container.innerHTML = `
+          <div class="review-waiting">
+            <div style="font-size: 42px; margin-bottom: 12px;">&#128260;</div>
+            <div class="review-waiting-text">Changes requested — regenerating...</div>
+            <div class="review-waiting-sub">
+              Your feedback has been sent. The planner agent is regenerating the documents.
+              ${reviewData.rejection_feedback ? `<br><br><strong>Your feedback:</strong> ${escapeHtml(reviewData.rejection_feedback)}` : ''}
+            </div>
+            <div class="loading-spinner" style="margin-top: 18px;"></div>
+          </div>
+        `;
+      } else {
+        container.innerHTML = `
+          <div class="review-waiting">
+            <div class="loading-spinner"></div>
+            <div class="review-waiting-text">Waiting for planning phase to complete...</div>
+            <div class="review-waiting-sub">The review will be available once PRD is finished.</div>
+          </div>
+        `;
+      }
       return;
     }
 

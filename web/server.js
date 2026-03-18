@@ -152,6 +152,7 @@ function getTeamReview(teamId) {
   });
   const isPending = reviewTask.status === 'pending' && depsDone;
   const isCompleted = reviewTask.status === 'completed';
+  const isRejected = !isPending && !isCompleted && !!reviewTask.last_rejected_at;
 
   // Read planning documents from project dir
   const projectDirFile = join(teamDir, 'project_dir');
@@ -197,6 +198,8 @@ function getTeamReview(teamId) {
     review_task: reviewTask,
     is_pending: isPending,
     is_completed: isCompleted,
+    is_rejected: isRejected,
+    rejection_feedback: reviewTask.rejection_feedback || null,
     documents,
   };
 }
@@ -211,11 +214,13 @@ function approveReview(teamId) {
   if (!reviewTask) return { success: false, error: 'No review task found' };
   if (reviewTask.status === 'completed') return { success: false, error: 'Already approved' };
 
-  // Mark review task as completed
+  // Mark review task as completed + clear rejection state
   reviewTask.status = 'completed';
   reviewTask.completed_at = new Date().toISOString();
   reviewTask.result = 'User approved via Web UI';
   reviewTask.owner = 'user';
+  delete reviewTask.last_rejected_at;
+  delete reviewTask.rejection_feedback;
 
   try {
     writeFileSync(queueFile, JSON.stringify(queue, null, 2));
@@ -233,6 +238,10 @@ function rejectReview(teamId, feedback) {
 
   const reviewTask = queue.tasks.find(t => t.assigned_to === '__review__');
   if (!reviewTask) return { success: false, error: 'No review task found' };
+
+  // Mark review task as rejected
+  reviewTask.last_rejected_at = new Date().toISOString();
+  reviewTask.rejection_feedback = feedback || '';
 
   // Find planning tasks (dependencies of the review task) and reset them
   const planTaskIds = reviewTask.depends_on || [];
