@@ -168,7 +168,8 @@ while true; do
 2. 결과물은 반드시 \$PROJECT_DIR 에 저장
 3. 다른 에이전트에게 전달할 내용은 \$TEAM_DIR/inbox/{에이전트명}_{timestamp}.json 으로 저장
 4. 프롬프트에 **활용 스킬** 섹션이 있으면 Skill 도구로 해당 스킬을 반드시 호출하여 작업 품질을 높일 것
-5. 완료 후 마지막 줄에 반드시 출력: TASK_RESULT: [완료 요약]
+5. Skill 도구 호출이 실패하면 해당 스킬 없이 계속 진행할 것 (graceful degradation). 스킬 미설치는 파이프라인 중단 사유가 아님
+6. 완료 후 마지막 줄에 반드시 출력: TASK_RESULT: [완료 요약]
 PROMPT_EOF
   )
 

@@ -6,7 +6,7 @@
 const app = (() => {
   // ── State ──
   let currentTeamId = null;
-  let currentView = 'overview'; // overview | logs | reports | review
+  let currentView = 'overview'; // overview | specs | review | logs | reports | chat
   let teams = [];
   let teamDetail = null;
   let eventSource = null;
@@ -14,6 +14,17 @@ const app = (() => {
   let activeLogAgent = null;
   let pollInterval = null;
   let reviewData = null;   // cached review documents
+
+  // Spec editor state
+  let specsData = null;    // { prd, stack, tasks, design }
+  let activeSpecKey = 'prd';
+  let specsOriginal = {};  // original content for revert
+  let specsDirty = {};     // { key: bool }
+
+  // Chat state
+  let chatMessages = [];
+  let chatLoading = false;
+  let chatStreamBuffer = '';
 
   // ── API ──
   async function api(path, options = {}) {
@@ -141,6 +152,22 @@ const app = (() => {
       if (currentView === 'reports') {
         renderReportsView();
       }
+    });
+
+    eventSource.addEventListener('chat-chunk', (e) => {
+      const data = JSON.parse(e.data);
+      chatStreamBuffer += data.text;
+      if (currentView === 'chat') updateChatStream();
+    });
+
+    eventSource.addEventListener('chat-done', (e) => {
+      const data = JSON.parse(e.data);
+      if (data.content) {
+        chatMessages.push({ id: `msg_${Date.now()}`, role: 'assistant', content: data.content, ts: new Date().toISOString() });
+      }
+      chatStreamBuffer = '';
+      chatLoading = false;
+      if (currentView === 'chat') renderChatMessages();
     });
 
     eventSource.addEventListener('heartbeat', () => {
@@ -344,11 +371,13 @@ const app = (() => {
     const tabs = `
       <div class="nav-tabs">
         <button class="nav-tab ${currentView === 'overview' ? 'active' : ''}" onclick="app.switchView('overview')">Overview</button>
+        <button class="nav-tab ${currentView === 'specs' ? 'active' : ''}" onclick="app.switchView('specs')">Specs</button>
         <button class="nav-tab ${currentView === 'review' ? 'active' : ''}" onclick="app.switchView('review')">
           Review ${reviewBadge}
         </button>
         <button class="nav-tab ${currentView === 'logs' ? 'active' : ''}" onclick="app.switchView('logs')">Logs</button>
         <button class="nav-tab ${currentView === 'reports' ? 'active' : ''}" onclick="app.switchView('reports')">Reports</button>
+        <button class="nav-tab ${currentView === 'chat' ? 'active' : ''}" onclick="app.switchView('chat')">Chat</button>
       </div>
     `;
 
@@ -379,6 +408,9 @@ const app = (() => {
       case 'overview':
         content = renderOverview();
         break;
+      case 'specs':
+        content = '<div id="specs-container"><div class="loading-spinner"></div></div>';
+        break;
       case 'review':
         content = '<div id="review-container"><div class="loading-spinner"></div></div>';
         break;
@@ -387,6 +419,9 @@ const app = (() => {
         break;
       case 'reports':
         content = renderReportsViewHTML();
+        break;
+      case 'chat':
+        content = renderChatView();
         break;
     }
 
@@ -405,6 +440,9 @@ const app = (() => {
     if (currentView === 'overview') {
       renderDependencyGraph();
     }
+    if (currentView === 'specs') {
+      loadAndRenderSpecs();
+    }
     if (currentView === 'review') {
       loadAndRenderReview();
     }
@@ -416,6 +454,9 @@ const app = (() => {
     }
     if (currentView === 'reports') {
       renderReportsView();
+    }
+    if (currentView === 'chat') {
+      loadChat();
     }
   }
 
@@ -967,6 +1008,261 @@ const app = (() => {
     }
   }
 
+  // ── Specs Editor ──
+  async function loadAndRenderSpecs() {
+    if (!currentTeamId) return;
+    const container = $('specs-container');
+    if (!container) return;
+
+    try {
+      const data = await api(`/teams/${currentTeamId}/specs`);
+      specsData = data.specs || {};
+      specsOriginal = { ...specsData };
+      specsDirty = {};
+    } catch {
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-text">Failed to load specs</div></div>';
+      return;
+    }
+
+    renderSpecsEditor();
+  }
+
+  function renderSpecsEditor() {
+    const container = $('specs-container');
+    if (!container) return;
+
+    const specKeys = [
+      { key: 'prd', label: 'PRD', icon: '&#128196;' },
+      { key: 'stack', label: 'Stack', icon: '&#9881;' },
+      { key: 'tasks', label: 'Tasks', icon: '&#9776;' },
+      { key: 'design', label: 'Design', icon: '&#127912;' },
+    ];
+
+    // Check if planning is still incomplete (for Skip to Dev button)
+    const tasks = teamDetail?.tasks || [];
+    const planningIncomplete = tasks.some(t =>
+      ['planner', 'architect', 'designer', '__review__'].includes(t.assigned_to) && t.status !== 'completed'
+    );
+
+    const tabs = specKeys.map(s => {
+      const hasDirty = specsDirty[s.key] ? ' spec-tab-dirty' : '';
+      const hasContent = specsData?.[s.key] ? '' : ' spec-tab-empty';
+      return `<button class="spec-tab${activeSpecKey === s.key ? ' active' : ''}${hasDirty}${hasContent}" onclick="app.selectSpec('${s.key}')">${s.icon} ${s.label}</button>`;
+    }).join('');
+
+    const content = specsData?.[activeSpecKey] || '';
+    const isDirty = specsDirty[activeSpecKey] || false;
+
+    container.innerHTML = `
+      <div class="card">
+        <div class="spec-tabs">${tabs}</div>
+        <div class="spec-editor-container">
+          <textarea class="spec-editor" id="spec-editor" spellcheck="false"
+            placeholder="No content yet. Paste or type your spec here..."
+            oninput="app.onSpecEdit()">${escapeHtml(content)}</textarea>
+        </div>
+        <div class="spec-actions">
+          <div class="spec-actions-left">
+            ${planningIncomplete ? `<button class="btn btn-sm" style="color: var(--accent-yellow); border-color: rgba(227,179,65,0.4);" onclick="app.skipToDev()">Skip to Dev</button>` : ''}
+          </div>
+          <div class="spec-actions-right">
+            <button class="btn btn-sm" onclick="app.revertSpec()" ${isDirty ? '' : 'disabled'}>Revert</button>
+            <button class="btn btn-primary btn-sm" onclick="app.saveSpec()" ${isDirty ? '' : 'disabled'}>Save</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function selectSpec(key) {
+    activeSpecKey = key;
+    renderSpecsEditor();
+  }
+
+  function onSpecEdit() {
+    const editor = $('spec-editor');
+    if (!editor) return;
+    const current = editor.value;
+    specsDirty[activeSpecKey] = current !== (specsOriginal[activeSpecKey] || '');
+    // Update button states without full re-render
+    const btns = document.querySelectorAll('.spec-actions .btn');
+    btns.forEach(btn => {
+      if (btn.textContent.trim() === 'Revert' || btn.textContent.trim() === 'Save') {
+        btn.disabled = !specsDirty[activeSpecKey];
+      }
+    });
+    // Update tab dirty indicator
+    const tabs = document.querySelectorAll('.spec-tab');
+    tabs.forEach(tab => {
+      if (tab.textContent.includes(activeSpecKey.charAt(0).toUpperCase() + activeSpecKey.slice(1).split('')[0])) {
+        tab.classList.toggle('spec-tab-dirty', specsDirty[activeSpecKey]);
+      }
+    });
+  }
+
+  async function saveSpec() {
+    const editor = $('spec-editor');
+    if (!editor || !currentTeamId) return;
+
+    try {
+      const result = await api(`/teams/${currentTeamId}/specs/${activeSpecKey}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content: editor.value }),
+      });
+      if (result.success) {
+        specsData[activeSpecKey] = editor.value;
+        specsOriginal[activeSpecKey] = editor.value;
+        specsDirty[activeSpecKey] = false;
+        showToast('Spec saved', 'success');
+        renderSpecsEditor();
+      } else {
+        showToast(result.error || 'Failed to save', 'error');
+      }
+    } catch (err) {
+      showToast('Error saving spec', 'error');
+    }
+  }
+
+  function revertSpec() {
+    if (!specsOriginal) return;
+    specsData[activeSpecKey] = specsOriginal[activeSpecKey] || '';
+    specsDirty[activeSpecKey] = false;
+    renderSpecsEditor();
+    showToast('Reverted to saved version');
+  }
+
+  async function skipToDev() {
+    if (!currentTeamId) return;
+    if (!confirm('Skip planning and start development? Planning tasks will be marked as completed.')) return;
+
+    try {
+      const result = await api(`/teams/${currentTeamId}/specs/skip`, { method: 'POST' });
+      if (result.success) {
+        showToast(`Skipped ${result.skipped?.length || 0} tasks`, 'success');
+        await loadTeamDetail(currentTeamId);
+        renderTeamView();
+      } else {
+        showToast(result.error || 'Failed to skip', 'error');
+      }
+    } catch {
+      showToast('Error skipping to dev', 'error');
+    }
+  }
+
+  // ── Chat View ──
+  function renderChatView() {
+    return `
+      <div class="chat-panel" id="chat-panel">
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-empty">Start a conversation about your project</div>
+        </div>
+        <div class="chat-input-area">
+          <textarea class="chat-input" id="chat-input" rows="2"
+            placeholder="Ask about your project, request changes, get explanations..."
+            onkeydown="app.chatKeyDown(event)"></textarea>
+          <div class="chat-input-actions">
+            <button class="btn btn-sm btn-ghost" onclick="app.clearChat()" data-tooltip="Clear history">Clear</button>
+            <button class="btn btn-primary btn-sm" id="chat-send-btn" onclick="app.sendChatMessage()">Send</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function loadChat() {
+    if (!currentTeamId) return;
+    try {
+      const data = await api(`/teams/${currentTeamId}/chat`);
+      chatMessages = data.messages || [];
+    } catch {
+      chatMessages = [];
+    }
+    renderChatMessages();
+    // Focus input
+    const input = $('chat-input');
+    if (input) input.focus();
+  }
+
+  function renderChatMessages() {
+    const container = $('chat-messages');
+    if (!container) return;
+
+    if (chatMessages.length === 0 && !chatLoading) {
+      container.innerHTML = '<div class="chat-empty">Start a conversation about your project</div>';
+      return;
+    }
+
+    container.innerHTML = chatMessages.map(m => `
+      <div class="chat-msg chat-msg-${m.role}">
+        <div class="chat-msg-label">${m.role === 'user' ? 'You' : 'AI'}</div>
+        <div class="chat-msg-content">${escapeHtml(m.content)}</div>
+      </div>
+    `).join('') + (chatLoading ? `
+      <div class="chat-msg chat-msg-assistant">
+        <div class="chat-msg-label">AI</div>
+        <div class="chat-msg-content chat-streaming" id="chat-stream">${escapeHtml(chatStreamBuffer) || '<span class="chat-typing">Thinking...</span>'}</div>
+      </div>
+    ` : '');
+
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function updateChatStream() {
+    const el = $('chat-stream');
+    if (el) {
+      el.textContent = chatStreamBuffer;
+      const container = $('chat-messages');
+      if (container) container.scrollTop = container.scrollHeight;
+    }
+  }
+
+  async function sendChatMessage() {
+    const input = $('chat-input');
+    if (!input || !currentTeamId) return;
+    const message = input.value.trim();
+    if (!message) return;
+    if (chatLoading) return;
+
+    // Add to local state immediately
+    chatMessages.push({ id: `msg_${Date.now()}`, role: 'user', content: message, ts: new Date().toISOString() });
+    chatLoading = true;
+    chatStreamBuffer = '';
+    input.value = '';
+    renderChatMessages();
+
+    try {
+      await api(`/teams/${currentTeamId}/chat`, {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+      });
+    } catch {
+      chatLoading = false;
+      showToast('Failed to send message', 'error');
+      renderChatMessages();
+    }
+  }
+
+  function chatKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChatMessage();
+    }
+  }
+
+  async function clearChat() {
+    if (!currentTeamId) return;
+    if (!confirm('Clear chat history?')) return;
+    try {
+      await api(`/teams/${currentTeamId}/chat/clear`, { method: 'POST' });
+      chatMessages = [];
+      chatStreamBuffer = '';
+      renderChatMessages();
+      showToast('Chat cleared');
+    } catch {
+      showToast('Failed to clear chat', 'error');
+    }
+  }
+
   // ── Pipeline Actions ──
   function showNewPipelineModal() {
     $('modal-new-pipeline').style.display = 'flex';
@@ -1329,5 +1625,15 @@ const app = (() => {
     toggleReviewDoc,
     approveReview,
     rejectReview,
+    // Specs
+    selectSpec,
+    onSpecEdit,
+    saveSpec,
+    revertSpec,
+    skipToDev,
+    // Chat
+    sendChatMessage,
+    chatKeyDown,
+    clearChat,
   };
 })();

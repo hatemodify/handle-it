@@ -361,7 +361,7 @@ step_spawn_agents() {
   agent_spawn "$team" "qa"        "QA 엔지니어 — 테스트 및 품질 보증" \
     "Read,Write,Edit,Bash,Glob,Grep,Skill" "$model"
   agent_spawn "$team" "git"       "Git 관리자 — 커밋 및 PR 생성" \
-    "Read,Write,Edit,Bash,Glob,Grep" "$model"
+    "Read,Write,Edit,Bash,Glob,Grep,Skill" "$model"
 
   log_success "에이전트 7개 스폰 완료"
 }

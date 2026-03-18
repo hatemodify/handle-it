@@ -3,7 +3,7 @@
 //  API + SSE + Static Files (zero dependencies)
 // ═══════════════════════════════════════════════════
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, watch, readFile, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, watch, readFile, rmSync, mkdirSync } from 'node:fs';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -356,6 +356,120 @@ function isValidTaskId(id) {
   return /^[a-zA-Z0-9_-]+$/.test(id);
 }
 
+// ── SSE client tracking (for chat streaming) ──
+const sseClients = new Map(); // teamId → Set<sendEvent>
+
+// ── Spec helpers ──
+const SPEC_FILES = {
+  prd: ['prd.md', 'PRD.md'],
+  stack: ['stack.json', 'tech_stack.json'],
+  tasks: ['tasks.json', 'dev_tasks.json'],
+  design: ['design_spec.json', 'design.json'],
+};
+
+function isValidSpecKey(key) {
+  return Object.hasOwn(SPEC_FILES, key);
+}
+
+function getTeamSpecs(teamId) {
+  const teamDir = join(TEAMS_ROOT, teamId);
+  const projectDirFile = join(teamDir, 'project_dir');
+  const projectDir = existsSync(projectDirFile)
+    ? readFileSync(projectDirFile, 'utf-8').trim()
+    : null;
+  if (!projectDir) return { specs: {} };
+
+  const specs = {};
+  for (const [key, names] of Object.entries(SPEC_FILES)) {
+    for (const name of names) {
+      const p = join(projectDir, name);
+      if (existsSync(p)) { specs[key] = readFileSync(p, 'utf-8'); break; }
+    }
+  }
+  return { specs, project_dir: projectDir };
+}
+
+function putTeamSpec(teamId, key, content) {
+  if (!isValidSpecKey(key)) return { success: false, error: 'Invalid spec key' };
+  if (typeof content !== 'string') return { success: false, error: 'Content must be string' };
+  if (content.length > 512000) return { success: false, error: 'Content too large (max 500KB)' };
+
+  const teamDir = join(TEAMS_ROOT, teamId);
+  const projectDirFile = join(teamDir, 'project_dir');
+  const projectDir = existsSync(projectDirFile)
+    ? readFileSync(projectDirFile, 'utf-8').trim()
+    : null;
+  if (!projectDir) return { success: false, error: 'No project directory' };
+
+  // Find existing file or use first candidate
+  const names = SPEC_FILES[key];
+  let target = null;
+  for (const name of names) {
+    const p = join(projectDir, name);
+    if (existsSync(p)) { target = p; break; }
+  }
+  if (!target) target = join(projectDir, names[0]);
+
+  try {
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(target, content);
+    return { success: true, file: target };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function skipToDev(teamId) {
+  const teamDir = join(TEAMS_ROOT, teamId);
+  const queueFile = join(teamDir, 'tasks', 'queue.json');
+  const queue = readJsonSafe(queueFile);
+  if (!queue?.tasks) return { success: false, error: 'Queue not found' };
+
+  const planningRoles = ['planner', 'architect', 'designer', '__review__'];
+  const skipped = [];
+  for (const task of queue.tasks) {
+    if (planningRoles.includes(task.assigned_to) && task.status !== 'completed') {
+      task.status = 'completed';
+      task.completed_at = new Date().toISOString();
+      task.result = 'Skipped via Web UI (Skip to Dev)';
+      task.owner = 'user';
+      skipped.push(task.id);
+    }
+  }
+
+  try {
+    writeFileSync(queueFile, JSON.stringify(queue, null, 2));
+    return { success: true, skipped };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ── Chat helpers ──
+function getChatFile(teamId) {
+  return join(TEAMS_ROOT, teamId, 'chat.json');
+}
+
+function readChat(teamId) {
+  const chatFile = getChatFile(teamId);
+  const data = readJsonSafe(chatFile);
+  return data?.messages || [];
+}
+
+function appendChatMessage(teamId, role, content) {
+  const chatFile = getChatFile(teamId);
+  let data = readJsonSafe(chatFile) || { messages: [] };
+  const msg = {
+    id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    role,
+    content,
+    ts: new Date().toISOString(),
+  };
+  data.messages.push(msg);
+  writeFileSync(chatFile, JSON.stringify(data, null, 2));
+  return msg;
+}
+
 // ── SSE ──
 function setupSSE(res, teamId) {
   res.writeHead(200, {
@@ -366,6 +480,8 @@ function setupSSE(res, teamId) {
   });
   res.write(':\n\n'); // keepalive comment
 
+  // Register SSE client for chat streaming
+  if (!sseClients.has(teamId)) sseClients.set(teamId, new Set());
   const teamDir = join(TEAMS_ROOT, teamId);
   const watchers = [];
   let debounceTimer = null;
@@ -378,6 +494,9 @@ function setupSSE(res, teamId) {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     } catch {}
   }
+
+  // Register for chat streaming
+  sseClients.get(teamId).add(sendEvent);
 
   function checkQueueUpdates() {
     const queueFile = join(teamDir, 'tasks', 'queue.json');
@@ -491,6 +610,12 @@ function setupSSE(res, teamId) {
     clearInterval(heartbeatInterval);
     if (debounceTimer) clearTimeout(debounceTimer);
     watchers.forEach(w => { try { w.close(); } catch {} });
+    // Unregister SSE client
+    const clients = sseClients.get(teamId);
+    if (clients) {
+      clients.delete(sendEvent);
+      if (clients.size === 0) sseClients.delete(teamId);
+    }
   });
 }
 
@@ -764,6 +889,161 @@ const server = createServer(async (req, res) => {
         return jsonResponse(res, rejectReview(params.id, body.feedback || ''));
       }
       return errorResponse(res, 'action must be "approve" or "reject"');
+    }
+
+    // ── Spec Editor APIs ──
+
+    // GET /api/teams/:id/specs
+    params = matchRoute(path, '/api/teams/:id/specs');
+    if (method === 'GET' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      return jsonResponse(res, getTeamSpecs(params.id));
+    }
+
+    // PUT /api/teams/:id/specs/:key
+    params = matchRoute(path, '/api/teams/:id/specs/:key');
+    if (method === 'PUT' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      if (!isValidSpecKey(params.key)) return errorResponse(res, 'Invalid spec key');
+      const body = await readBody(req);
+      return jsonResponse(res, putTeamSpec(params.id, params.key, body.content));
+    }
+
+    // POST /api/teams/:id/specs/skip
+    params = matchRoute(path, '/api/teams/:id/specs/skip');
+    if (method === 'POST' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      return jsonResponse(res, skipToDev(params.id));
+    }
+
+    // ── Chat APIs ──
+
+    // GET /api/teams/:id/chat
+    params = matchRoute(path, '/api/teams/:id/chat');
+    if (method === 'GET' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      return jsonResponse(res, { messages: readChat(params.id) });
+    }
+
+    // POST /api/teams/:id/chat
+    params = matchRoute(path, '/api/teams/:id/chat');
+    if (method === 'POST' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      const body = await readBody(req);
+      if (!body.message || typeof body.message !== 'string' || body.message.trim().length === 0) {
+        return errorResponse(res, 'message is required');
+      }
+      if (body.message.length > 10000) {
+        return errorResponse(res, 'message too long (max 10000 chars)');
+      }
+
+      const teamDir = join(TEAMS_ROOT, params.id);
+      const teamId = params.id;
+
+      // Save user message
+      const userMsg = appendChatMessage(teamId, 'user', body.message.trim());
+
+      // Build context prompt
+      const projectDirFile = join(teamDir, 'project_dir');
+      const projectDir = existsSync(projectDirFile)
+        ? readFileSync(projectDirFile, 'utf-8').trim()
+        : null;
+
+      let context = '';
+      if (projectDir) {
+        // Read CLAUDE.md
+        const claudeMd = join(projectDir, 'CLAUDE.md');
+        if (existsSync(claudeMd)) {
+          try { context += `## CLAUDE.md\n${readFileSync(claudeMd, 'utf-8').slice(0, 2000)}\n\n`; } catch {}
+        }
+        // Read prd.md summary
+        for (const name of ['prd.md', 'PRD.md']) {
+          const p = join(projectDir, name);
+          if (existsSync(p)) {
+            try { context += `## PRD (요약)\n${readFileSync(p, 'utf-8').slice(0, 1500)}\n\n`; } catch {}
+            break;
+          }
+        }
+        // Read stack.json
+        for (const name of ['stack.json', 'tech_stack.json']) {
+          const p = join(projectDir, name);
+          if (existsSync(p)) {
+            try { context += `## Tech Stack\n${readFileSync(p, 'utf-8').slice(0, 1000)}\n\n`; } catch {}
+            break;
+          }
+        }
+      }
+
+      // Build conversation history (last 10 messages)
+      const allMessages = readChat(teamId);
+      const recentMessages = allMessages.slice(-10);
+      let conversationHistory = recentMessages.map(m =>
+        `${m.role === 'user' ? 'Human' : 'Assistant'}: ${m.content}`
+      ).join('\n\n');
+
+      const prompt = `You are an AI assistant for a software project. Answer questions about the project, help with code, and provide guidance.
+
+## Project Context
+${context || 'No project context available.'}
+${projectDir ? `Project directory: ${projectDir}` : ''}
+
+## Conversation
+${conversationHistory}
+
+Respond to the latest message. Be concise and helpful. Answer in the same language as the user's message.`;
+
+      // Spawn claude --print
+      const claudeBin = process.env.CLAUDE_BIN || 'claude';
+      const child = spawn(claudeBin, [
+        '--print',
+        '--allowedTools', 'Read,Glob,Grep',
+        '--dangerously-skip-permissions',
+        '-p', prompt,
+      ], { env: { ...process.env, CLAUDECODE: '' }, stdio: 'pipe' });
+
+      let fullResponse = '';
+
+      child.stdout.on('data', (chunk) => {
+        const text = chunk.toString();
+        fullResponse += text;
+        // Stream to all SSE clients for this team
+        const clients = sseClients.get(teamId);
+        if (clients) {
+          clients.forEach(fn => fn('chat-chunk', { text, msg_id: userMsg.id }));
+        }
+      });
+
+      child.stderr.on('data', (chunk) => {
+        // Ignore stderr but capture for debugging
+      });
+
+      child.on('close', () => {
+        // Save assistant response
+        if (fullResponse.trim()) {
+          appendChatMessage(teamId, 'assistant', fullResponse.trim());
+        }
+        // Notify done
+        const clients = sseClients.get(teamId);
+        if (clients) {
+          clients.forEach(fn => fn('chat-done', { msg_id: userMsg.id, content: fullResponse.trim() }));
+        }
+      });
+
+      // Return immediately with message ID
+      return jsonResponse(res, { id: userMsg.id });
+    }
+
+    // POST /api/teams/:id/chat/clear
+    params = matchRoute(path, '/api/teams/:id/chat/clear');
+    if (method === 'POST' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      const chatFile = getChatFile(params.id);
+      try {
+        writeFileSync(chatFile, JSON.stringify({ messages: [] }, null, 2));
+        return jsonResponse(res, { success: true });
+      } catch (err) {
+        return jsonResponse(res, { success: false, error: err.message });
+      }
     }
 
     // GET /api/events/:id (SSE)

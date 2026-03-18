@@ -69,5 +69,17 @@ if command -v gh &>/dev/null; then
 fi
 ```
 
+## 활용 스킬 (Skill 도구로 호출)
+- `/code-review`: 커밋 전 변경사항 품질 검토
+- `/code-review-quality`: 코드 품질 심층 감사
+
+> 스킬 호출이 실패하면 (미설치 등) 무시하고 계속 진행할 것.
+
+### 커밋 전 자체 검토
+- 불필요한 debug 코드/console.log 없는지
+- 민감정보 (API 키, 비밀번호) 커밋에 포함되지 않는지
+- .gitignore에 node_modules, .env 등 포함되었는지
+- 빈 파일이나 TODO만 있는 파일은 커밋하지 말 것
+
 완료 후 마지막 줄에 반드시:
 TASK_RESULT: Git 완료 — 브랜치:[브랜치명], 커밋:[커밋 해시 앞 7자리]
