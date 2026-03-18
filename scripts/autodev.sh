@@ -248,43 +248,43 @@ step_register_tasks() {
   else
     # ── 신규 모드: 기존 9개 태스크 ──
 
-    # ── Phase 1: 병렬 가능 (의존성 없음) ──
+    # ── Phase 1: PRD 작성 (의존성 없음) ──
     T_PRD=$(tq_add "$queue" \
       "PRD 작성" \
       "$(sed "s|{{IDEA}}|$IDEA_ESCAPED|g; s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
         "$AUTODEV_PROMPTS/planner.md")" \
       "" "planner")
 
+    # ── Review Gate: PRD 검토 후 나머지 planning + 개발 진행 ──
+    T_REVIEW=$(tq_add "$queue" \
+      "계획 검토 대기" \
+      "PRD 작성 결과를 사용자가 검토합니다. Web UI에서 승인하면 기술스택 결정, 디자인, 태스크 분해 및 개발을 시작합니다." \
+      "$T_PRD" "__review__")
+
+    # ── Phase 2: 검토 승인 후 — 병렬 planning ──
     T_STACK=$(tq_add "$queue" \
       "기술스택 결정" \
       "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
         "$AUTODEV_PROMPTS/architect.md")" \
-      "" "architect")
+      "$T_REVIEW" "architect")
 
-    # ── Phase 2: PRD 완료 후 ──
     T_DESIGN=$(tq_add "$queue" \
       "디자인 스펙 생성" \
       "PRD($PROJECT_DIR/prd.md)를 읽고 UI 컴포넌트 목록, 색상 팔레트, 타이포그래피를 design_spec.json으로 저장. 다크 프리미엄 톤 기본값." \
-      "$T_PRD" "designer")
+      "$T_REVIEW" "designer")
 
     T_TASKS=$(tq_add "$queue" \
       "개발 태스크 분해" \
       "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g" \
         "$AUTODEV_PROMPTS/architect.md") — 태스크 분해 단계만 실행" \
-      "$T_PRD,$T_STACK" "architect")
+      "$T_REVIEW,$T_STACK" "architect")
 
-    # ── Review Gate: 사람 검토 후 개발 진행 ──
-    T_REVIEW=$(tq_add "$queue" \
-      "계획 검토 대기" \
-      "PRD, 기술스택, 태스크 분해 결과를 사용자가 검토합니다. Web UI에서 승인하면 개발을 시작합니다." \
-      "$T_TASKS,$T_DESIGN" "__review__")
-
-    # ── Phase 3: 검토 승인 후 (tasks.json 기반 동적 실행) ──
+    # ── Phase 3: planning 완료 후 — 개발 ──
     T_SETUP=$(tq_add "$queue" \
       "프로젝트 초기 세팅" \
       "$(sed "s|{{PROJECT_DIR}}|$PROJECT_DIR_ESCAPED|g; s|{{TASK_DESCRIPTION}}|stack.json의 기술스택으로 프로젝트 초기화. package.json, tsconfig, eslint, tailwind 설정. tasks.json의 Phase 1 태스크를 모두 실행.|g" \
         "$AUTODEV_PROMPTS/developer.md")" \
-      "$T_REVIEW" "dev1")
+      "$T_TASKS" "dev1")
 
     T_CORE=$(tq_add "$queue" \
       "백엔드/로직 구현" \
