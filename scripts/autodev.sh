@@ -540,16 +540,16 @@ $(cat "$HOME/.handle-it/CLAUDE.md" 2>/dev/null || echo '컨텍스트 없음')
   RERUN_TIMEOUT="${AUTODEV_TASK_TIMEOUT:-900}"
   RESULT_FILE=$(mktemp)
   RERUN_MODEL="${AUTODEV_MODEL:-}"
-  RERUN_MODEL_FLAG=""
+  RERUN_MODEL_ARGS=()
   if [ -n "$RERUN_MODEL" ]; then
-    RERUN_MODEL_FLAG="--model $RERUN_MODEL"
+    RERUN_MODEL_ARGS=("--model" "$RERUN_MODEL")
   fi
   log_info "Claude 실행 중 (타임아웃: ${RERUN_TIMEOUT}초)..."
 
   (
     unset CLAUDECODE 2>/dev/null || true
     "$CLAUDE_BIN" --print \
-      $RERUN_MODEL_FLAG \
+      "${RERUN_MODEL_ARGS[@]}" \
       --allowedTools "Read,Write,Edit,Bash,Glob,Grep,Skill" \
       --dangerously-skip-permissions \
       -p "$CLAUDE_PROMPT" 2>&1 | tee "$RESULT_FILE"
