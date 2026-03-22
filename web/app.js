@@ -6,7 +6,7 @@
 const app = (() => {
   // ── State ──
   let currentTeamId = null;
-  let currentView = 'overview'; // overview | specs | review | logs | reports | chat
+  let currentView = 'overview'; // overview | specs | review | logs | reports | summary | chat
   let teams = [];
   let teamDetail = null;
   let eventSource = null;
@@ -25,6 +25,12 @@ const app = (() => {
   let chatMessages = [];
   let chatLoading = false;
   let chatStreamBuffer = '';
+
+  // Agent activity state
+  let agentActivities = {}; // { agentName: { text, fileCount, ts } }
+
+  // Spec validation state
+  let specValidation = { valid: true, error: null };
 
   // ── API ──
   async function api(path, options = {}) {
@@ -143,6 +149,8 @@ const app = (() => {
       if (logData[teamId][data.agent].length > 5000) {
         logData[teamId][data.agent] = logData[teamId][data.agent].slice(-5000);
       }
+      parseAgentActivity(data.agent, data.lines);
+      if (currentView === 'overview') renderAgentCards();
       if (currentView === 'logs' && activeLogAgent === data.agent) {
         appendLogLines(data.lines);
       }
@@ -205,6 +213,89 @@ const app = (() => {
   function escapeHtml(str) {
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── Markdown Renderer (zero-dep) ──
+  function renderMarkdown(text) {
+    if (!text) return '';
+    // Protect code blocks first
+    const codeBlocks = [];
+    let safe = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push(`<pre class="md-code-block"><code class="md-lang-${lang || 'text'}">${escapeHtml(code.trimEnd())}</code></pre>`);
+      return `\x00CB${idx}\x00`;
+    });
+    // Inline code
+    const inlineCodes = [];
+    safe = safe.replace(/`([^`]+)`/g, (_, code) => {
+      const idx = inlineCodes.length;
+      inlineCodes.push(`<code class="md-inline-code">${escapeHtml(code)}</code>`);
+      return `\x00IC${idx}\x00`;
+    });
+    // Escape remaining HTML
+    safe = escapeHtml(safe);
+    // Bold
+    safe = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Italic
+    safe = safe.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // Headers
+    safe = safe.replace(/^### (.+)$/gm, '<h5 class="md-h">$1</h5>');
+    safe = safe.replace(/^## (.+)$/gm, '<h4 class="md-h">$1</h4>');
+    safe = safe.replace(/^# (.+)$/gm, '<h3 class="md-h">$1</h3>');
+    // Unordered lists
+    safe = safe.replace(/^(?:[-*]) (.+)$/gm, '<li>$1</li>');
+    safe = safe.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+    // Ordered lists
+    safe = safe.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    // Links
+    safe = safe.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // Line breaks (but not inside block elements)
+    safe = safe.replace(/\n/g, '<br>');
+    // Restore inline codes
+    safe = safe.replace(/\x00IC(\d+)\x00/g, (_, idx) => inlineCodes[idx]);
+    // Restore code blocks
+    safe = safe.replace(/\x00CB(\d+)\x00/g, (_, idx) => codeBlocks[idx]);
+    return safe;
+  }
+
+  // ── JSON Validator ──
+  function validateJson(text) {
+    try {
+      JSON.parse(text);
+      return { valid: true };
+    } catch (e) {
+      const match = e.message.match(/position (\d+)/);
+      let line = null;
+      if (match) {
+        const pos = parseInt(match[1], 10);
+        line = text.substring(0, pos).split('\n').length;
+      }
+      return { valid: false, error: e.message, line };
+    }
+  }
+
+  // ── Agent Activity Parser ──
+  function parseAgentActivity(agentName, lines) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const l = lines[i];
+      if (!l || l.trim().length === 0) continue;
+      // File operations
+      const fileMatch = l.match(/(?:Creat|Writ|Modif|Generat|Sav)\w+.*?(\S+\.\w{1,5})/i);
+      if (fileMatch) {
+        agentActivities[agentName] = { text: l.trim().slice(0, 60), ts: Date.now() };
+        return;
+      }
+      // TASK_RESULT
+      if (l.includes('TASK_RESULT:')) {
+        agentActivities[agentName] = { text: l.replace('TASK_RESULT:', '').trim().slice(0, 60), ts: Date.now() };
+        return;
+      }
+      // Claude output start/end
+      if (l.includes('Claude 출력') || l.includes('태스크 시작') || l.includes('태스크 완료')) {
+        agentActivities[agentName] = { text: l.trim().slice(0, 60), ts: Date.now() };
+        return;
+      }
+    }
   }
 
   // ── Toast Notifications ──
@@ -350,6 +441,133 @@ const app = (() => {
     return `${d}d ago`;
   }
 
+  // ── Pipeline Stage Detection ──
+  function getPipelineStage() {
+    const tasks = teamDetail?.tasks || [];
+    if (tasks.length === 0) return { stage: 'init', label: 'Initializing', step: 0 };
+
+    const byAssigned = {};
+    tasks.forEach(t => { byAssigned[t.assigned_to] = t; });
+
+    const allCompleted = tasks.every(t => t.status === 'completed');
+    if (allCompleted) return { stage: 'done', label: 'Completed', step: 5 };
+
+    const hasFailed = tasks.some(t => t.status === 'failed');
+    if (hasFailed) return { stage: 'error', label: 'Error', step: -1 };
+
+    // Check phases in order
+    const plannerDone = tasks.filter(t => t.assigned_to === 'planner').every(t => t.status === 'completed');
+    const reviewDone = tasks.filter(t => t.assigned_to === '__review__').every(t => t.status === 'completed');
+    const designDone = tasks.filter(t => ['architect', 'designer'].includes(t.assigned_to)).every(t => t.status === 'completed');
+    const devDone = tasks.filter(t => t.assigned_to?.startsWith('dev')).every(t => t.status === 'completed');
+    const qaDone = tasks.filter(t => t.assigned_to === 'qa').every(t => t.status === 'completed');
+
+    if (!plannerDone) return { stage: 'planning', label: 'Planning', step: 1 };
+    if (!reviewDone) return { stage: 'review', label: 'Review', step: 1 };
+    if (!designDone) return { stage: 'design', label: 'Architecture', step: 2 };
+    if (!devDone) return { stage: 'development', label: 'Development', step: 3 };
+    if (!qaDone) return { stage: 'testing', label: 'Testing', step: 4 };
+    return { stage: 'deploying', label: 'Deploying', step: 5 };
+  }
+
+  function renderStepIndicator() {
+    const { step, label } = getPipelineStage();
+    const steps = [
+      { num: 1, name: 'Plan' },
+      { num: 2, name: 'Design' },
+      { num: 3, name: 'Develop' },
+      { num: 4, name: 'Test' },
+      { num: 5, name: 'Deploy' },
+    ];
+
+    return `
+      <div class="step-indicator">
+        ${steps.map(s => {
+          const cls = step >= s.num ? 'step-done' : (step === s.num - 1 ? 'step-active' : '');
+          return `<div class="step-item ${cls}">
+            <div class="step-dot">${step > s.num ? '&#10003;' : s.num}</div>
+            <div class="step-name">${s.name}</div>
+          </div>`;
+        }).join('<div class="step-line"></div>')}
+      </div>
+    `;
+  }
+
+  // ── Summary View ──
+  function renderSummaryView() {
+    return '<div id="summary-container"><div class="loading-spinner"></div></div>';
+  }
+
+  async function loadAndRenderSummary() {
+    const container = $('summary-container');
+    if (!container || !currentTeamId) return;
+
+    try {
+      const data = await api(`/teams/${currentTeamId}/summary`);
+      if (data.error) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-state-text">Summary not available yet</div><div class="empty-state-desc">${escapeHtml(data.error)}</div></div>`;
+        return;
+      }
+
+      const s = data;
+      const duration = s.duration_min ? `${s.duration_min} min` : '-';
+      const fileList = (s.files_created || []).slice(0, 20).map(f =>
+        `<div class="summary-file">${escapeHtml(f)}</div>`
+      ).join('');
+      const moreFiles = (s.files_created || []).length > 20
+        ? `<div class="summary-more">+${s.files_created.length - 20} more files</div>` : '';
+
+      container.innerHTML = `
+        <div class="card">
+          <div class="card-header"><span class="card-title">Pipeline Summary</span></div>
+          <div class="card-body">
+            <div class="summary-stats">
+              <div class="summary-stat">
+                <div class="summary-stat-value">${s.tasks_completed || 0}/${s.tasks_total || 0}</div>
+                <div class="summary-stat-label">Tasks</div>
+              </div>
+              <div class="summary-stat">
+                <div class="summary-stat-value">${duration}</div>
+                <div class="summary-stat-label">Duration</div>
+              </div>
+              <div class="summary-stat">
+                <div class="summary-stat-value">${(s.files_created || []).length}</div>
+                <div class="summary-stat-label">Files</div>
+              </div>
+              <div class="summary-stat">
+                <div class="summary-stat-value">${s.agents_used || 0}</div>
+                <div class="summary-stat-label">Agents</div>
+              </div>
+            </div>
+            ${s.pr_url ? `<div class="summary-pr"><a href="${escapeHtml(s.pr_url)}" target="_blank" rel="noopener">&#128279; View Pull Request</a></div>` : ''}
+          </div>
+        </div>
+        ${fileList ? `
+        <div class="card" style="margin-top: 16px;">
+          <div class="card-header"><span class="card-title">Generated Files</span></div>
+          <div class="card-body summary-files">${fileList}${moreFiles}</div>
+        </div>` : ''}
+      `;
+    } catch {
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-text">Failed to load summary</div></div>';
+    }
+  }
+
+  // ── Mobile Sidebar Toggle ──
+  function toggleMobileSidebar() {
+    const sidebar = $('sidebar');
+    const overlay = $('sidebar-overlay');
+    if (!sidebar) return;
+    const isOpen = sidebar.classList.contains('sidebar-open');
+    if (isOpen) {
+      sidebar.classList.remove('sidebar-open');
+      if (overlay) overlay.style.display = 'none';
+    } else {
+      sidebar.classList.add('sidebar-open');
+      if (overlay) overlay.style.display = 'block';
+    }
+  }
+
   // ── Team View ──
   function hasReviewPending() {
     const tasks = teamDetail?.tasks || [];
@@ -368,6 +586,9 @@ const app = (() => {
     const reviewPending = hasReviewPending();
     const reviewBadge = reviewPending ? '<span class="review-badge">Review Required</span>' : '';
 
+    const stepIndicator = renderStepIndicator();
+
+    const allDone = (teamDetail.tasks || []).length > 0 && (teamDetail.tasks || []).every(t => t.status === 'completed');
     const tabs = `
       <div class="nav-tabs">
         <button class="nav-tab ${currentView === 'overview' ? 'active' : ''}" onclick="app.switchView('overview')">Overview</button>
@@ -377,6 +598,7 @@ const app = (() => {
         </button>
         <button class="nav-tab ${currentView === 'logs' ? 'active' : ''}" onclick="app.switchView('logs')">Logs</button>
         <button class="nav-tab ${currentView === 'reports' ? 'active' : ''}" onclick="app.switchView('reports')">Reports</button>
+        ${allDone ? `<button class="nav-tab ${currentView === 'summary' ? 'active' : ''}" onclick="app.switchView('summary')">Summary</button>` : ''}
         <button class="nav-tab ${currentView === 'chat' ? 'active' : ''}" onclick="app.switchView('chat')">Chat</button>
       </div>
     `;
@@ -420,6 +642,9 @@ const app = (() => {
       case 'reports':
         content = renderReportsViewHTML();
         break;
+      case 'summary':
+        content = renderSummaryView();
+        break;
       case 'chat':
         content = renderChatView();
         break;
@@ -434,7 +659,7 @@ const app = (() => {
          </div>`
       : '';
 
-    renderMain(actions + tabs + reviewBanner + content);
+    renderMain(actions + stepIndicator + tabs + reviewBanner + content);
 
     // Post-render hooks
     if (currentView === 'overview') {
@@ -454,6 +679,9 @@ const app = (() => {
     }
     if (currentView === 'reports') {
       renderReportsView();
+    }
+    if (currentView === 'summary') {
+      loadAndRenderSummary();
     }
     if (currentView === 'chat') {
       loadChat();
@@ -610,6 +838,7 @@ const app = (() => {
             <span class="agent-task-icon">&#9654;</span>
             <span>${escapeHtml(current.id)}: ${escapeHtml(current.subject)}</span>
           </div>
+          ${agentActivities[a.name] ? `<div class="agent-activity">${escapeHtml(agentActivities[a.name].text)}</div>` : ''}
         ` : ''}
         ${totalAssigned > 0 ? `
           <div class="agent-task-summary">
@@ -1075,6 +1304,7 @@ const app = (() => {
             placeholder="No content yet. Paste or type your spec here..."
             oninput="app.onSpecEdit()">${escapeHtml(content)}</textarea>
         </div>
+        <div id="spec-validation" class="spec-validation-bar"></div>
         <div class="spec-actions">
           <div class="spec-actions-left">
             ${planningIncomplete ? `<button class="btn btn-sm" style="color: var(--accent-yellow); border-color: rgba(227,179,65,0.4);" onclick="app.skipToDev()">Skip to Dev</button>` : ''}
@@ -1098,18 +1328,28 @@ const app = (() => {
     if (!editor) return;
     const current = editor.value;
     specsDirty[activeSpecKey] = current !== (specsOriginal[activeSpecKey] || '');
+    // JSON validation for non-markdown specs
+    if (activeSpecKey !== 'prd' && current.trim()) {
+      specValidation = validateJson(current);
+    } else {
+      specValidation = { valid: true };
+    }
+    // Update validation bar
+    const valBar = $('spec-validation');
+    if (valBar) {
+      if (activeSpecKey === 'prd' || !current.trim()) {
+        valBar.innerHTML = '';
+      } else if (specValidation.valid) {
+        valBar.innerHTML = '<span class="spec-validation-ok">&#10003; Valid JSON</span>';
+      } else {
+        valBar.innerHTML = `<span class="spec-validation-error">&#10007; ${escapeHtml(specValidation.error)}</span>`;
+      }
+    }
     // Update button states without full re-render
     const btns = document.querySelectorAll('.spec-actions .btn');
     btns.forEach(btn => {
       if (btn.textContent.trim() === 'Revert' || btn.textContent.trim() === 'Save') {
         btn.disabled = !specsDirty[activeSpecKey];
-      }
-    });
-    // Update tab dirty indicator
-    const tabs = document.querySelectorAll('.spec-tab');
-    tabs.forEach(tab => {
-      if (tab.textContent.includes(activeSpecKey.charAt(0).toUpperCase() + activeSpecKey.slice(1).split('')[0])) {
-        tab.classList.toggle('spec-tab-dirty', specsDirty[activeSpecKey]);
       }
     });
   }
@@ -1209,12 +1449,12 @@ const app = (() => {
     container.innerHTML = chatMessages.map(m => `
       <div class="chat-msg chat-msg-${m.role}">
         <div class="chat-msg-label">${m.role === 'user' ? 'You' : 'AI'}</div>
-        <div class="chat-msg-content">${escapeHtml(m.content)}</div>
+        <div class="chat-msg-content">${m.role === 'assistant' ? renderMarkdown(m.content) : escapeHtml(m.content)}</div>
       </div>
     `).join('') + (chatLoading ? `
       <div class="chat-msg chat-msg-assistant">
         <div class="chat-msg-label">AI</div>
-        <div class="chat-msg-content chat-streaming" id="chat-stream">${escapeHtml(chatStreamBuffer) || '<span class="chat-typing">Thinking...</span>'}</div>
+        <div class="chat-msg-content chat-streaming" id="chat-stream">${chatStreamBuffer ? renderMarkdown(chatStreamBuffer) : '<span class="chat-typing">Thinking...</span>'}</div>
       </div>
     ` : '');
 
@@ -1224,7 +1464,7 @@ const app = (() => {
   function updateChatStream() {
     const el = $('chat-stream');
     if (el) {
-      el.textContent = chatStreamBuffer;
+      el.innerHTML = renderMarkdown(chatStreamBuffer);
       const container = $('chat-messages');
       if (container) container.scrollTop = container.scrollHeight;
     }
@@ -1288,6 +1528,10 @@ const app = (() => {
     $('input-name').value = '';
     $('input-idea').value = '';
     $('input-project-dir').value = '';
+    const fb = $('new-folder-browser');
+    if (fb) fb.style.display = 'none';
+    const selected = $('new-folder-picker-selected');
+    if (selected) selected.innerHTML = '<span class="folder-picker-placeholder">Select output folder...</span>';
   }
 
   // ── Folder Browser ──
@@ -1390,6 +1634,89 @@ const app = (() => {
       nameInput.value = name;
     }
     $('folder-browser').style.display = 'none';
+    showToast('Folder selected: ' + name);
+  }
+
+  // ── New Pipeline Folder Browser ──
+  let newFolderBrowserPath = '';
+
+  async function openNewFolderBrowser() {
+    const browser = $('new-folder-browser');
+    if (browser.style.display !== 'none') {
+      browser.style.display = 'none';
+      return;
+    }
+    browser.style.display = 'block';
+    await newBrowseTo(newFolderBrowserPath || '~');
+  }
+
+  async function newBrowseTo(dirPath) {
+    const list = $('new-folder-browser-list');
+    const pathEl = $('new-folder-browser-path');
+    const footer = $('new-folder-browser-footer');
+    if (!list) return;
+
+    list.innerHTML = '<div style="padding: 12px; color: var(--text-dim);">Loading...</div>';
+    if (footer) footer.innerHTML = '';
+
+    try {
+      const data = await api(`/browse?path=${encodeURIComponent(dirPath)}`);
+      if (data.error) {
+        list.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">${escapeHtml(data.error)}</div>`;
+        return;
+      }
+
+      newFolderBrowserPath = data.path;
+      if (pathEl) pathEl.textContent = data.path;
+
+      if (data.entries.length === 0) {
+        list.innerHTML = '<div style="padding: 12px; color: var(--text-dim);">No subdirectories</div>';
+      } else {
+        list.innerHTML = data.entries.map(e => `
+          <div class="folder-browser-item" data-path="${encodeURIComponent(e.path)}">
+            <span class="folder-icon">&#128193;</span>
+            <span class="folder-name">${escapeHtml(e.name)}</span>
+            ${e.is_project ? '<span class="folder-project-hint">project</span>' : ''}
+          </div>
+        `).join('');
+      }
+
+      list.onclick = (e) => {
+        const item = e.target.closest('.folder-browser-item');
+        if (item?.dataset.path) newBrowseTo(decodeURIComponent(item.dataset.path));
+      };
+
+      if (footer) {
+        const currentName = data.path.split('/').pop() || data.path;
+        footer.innerHTML = `
+          <button class="btn btn-primary btn-sm folder-select-btn" id="new-folder-select-current">
+            Select this folder${data.is_project ? ' (project detected)' : ''}
+          </button>
+        `;
+        $('new-folder-select-current').onclick = () => selectNewFolder(data.path, currentName);
+      }
+    } catch (err) {
+      list.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">Error: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function newFolderBrowserUp() {
+    if (!newFolderBrowserPath) return;
+    const parent = newFolderBrowserPath.split('/').slice(0, -1).join('/') || '/';
+    newBrowseTo(parent);
+  }
+
+  function selectNewFolder(path, name) {
+    $('input-project-dir').value = path;
+    const selected = $('new-folder-picker-selected');
+    if (selected) {
+      selected.innerHTML = `<span class="folder-icon">&#128193;</span> <span>${escapeHtml(path)}</span>`;
+    }
+    const nameInput = $('input-name');
+    if (nameInput && !nameInput.value.trim()) {
+      nameInput.value = name;
+    }
+    $('new-folder-browser').style.display = 'none';
     showToast('Folder selected: ' + name);
   }
 
@@ -1595,7 +1922,13 @@ const app = (() => {
     if (e.key === 'Escape') {
       const modal1 = $('modal-new-pipeline');
       if (modal1 && modal1.style.display !== 'none') {
-        hideNewPipelineModal();
+        const nfb = $('new-folder-browser');
+        if (nfb && nfb.style.display !== 'none') {
+          nfb.style.display = 'none';
+        } else {
+          hideNewPipelineModal();
+        }
+        return;
       }
       const modal2 = $('modal-import');
       if (modal2 && modal2.style.display !== 'none') {
@@ -1627,6 +1960,8 @@ const app = (() => {
     browseTo,
     folderBrowserUp,
     selectFolder,
+    openNewFolderBrowser,
+    newFolderBrowserUp,
     startPipeline,
     startImport,
     sendPrompt,
@@ -1649,5 +1984,7 @@ const app = (() => {
     sendChatMessage,
     chatKeyDown,
     clearChat,
+    // Mobile
+    toggleMobileSidebar,
   };
 })();

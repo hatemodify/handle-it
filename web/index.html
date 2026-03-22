@@ -10,6 +10,7 @@
   <div class="app" id="app">
     <!-- Header -->
     <header class="header">
+      <button class="mobile-menu-btn" onclick="app.toggleMobileSidebar()" aria-label="Menu">&#9776;</button>
       <a href="#/" class="header-title" style="text-decoration: none;">
         <span>handle-it</span>
       </a>
@@ -22,6 +23,9 @@
         <button class="btn btn-primary" id="btn-new-pipeline" onclick="app.showNewPipelineModal()">+ New Pipeline</button>
       </div>
     </header>
+
+    <!-- Sidebar Overlay (mobile) -->
+    <div class="sidebar-overlay" id="sidebar-overlay" onclick="app.toggleMobileSidebar()" style="display: none;"></div>
 
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
@@ -66,8 +70,22 @@
           <textarea class="form-textarea" id="input-idea" placeholder="AI diary app with sentiment analysis and dark mode..."></textarea>
         </div>
         <div class="form-group">
-          <label class="form-label" for="input-project-dir">Output Directory (optional)</label>
-          <input class="form-input" id="input-project-dir" type="text" placeholder="~/projects/my-app">
+          <label class="form-label">Output Directory (optional)</label>
+          <div class="folder-picker">
+            <div class="folder-picker-selected" id="new-folder-picker-selected">
+              <span class="folder-picker-placeholder">Select output folder...</span>
+            </div>
+            <button class="btn btn-sm" onclick="app.openNewFolderBrowser()">Browse</button>
+          </div>
+          <input type="hidden" id="input-project-dir">
+          <div id="new-folder-browser" class="folder-browser" style="display: none;">
+            <div class="folder-browser-bar">
+              <button class="btn btn-sm" onclick="app.newFolderBrowserUp()">&#8593; Up</button>
+              <div class="folder-browser-path" id="new-folder-browser-path"></div>
+            </div>
+            <div class="folder-browser-list" id="new-folder-browser-list"></div>
+            <div class="folder-browser-footer" id="new-folder-browser-footer"></div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">

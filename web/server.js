@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, watch, 
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { homedir } from 'node:os';
+import { homedir, networkInterfaces } from 'node:os';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = join(__dir, '..');
@@ -268,6 +268,72 @@ function rejectReview(teamId, feedback) {
   } catch (err) {
     return { success: false, error: err.message };
   }
+}
+
+function getTeamSummary(teamId) {
+  const teamDir = join(TEAMS_ROOT, teamId);
+  const queueFile = join(teamDir, 'tasks', 'queue.json');
+  if (!existsSync(queueFile)) return { error: 'No task queue found' };
+
+  const queue = readJsonSafe(queueFile);
+  if (!queue?.tasks) return { error: 'Invalid queue' };
+
+  const tasks = queue.tasks;
+  const completed = tasks.filter(t => t.status === 'completed');
+  if (completed.length === 0) return { error: 'No tasks completed yet' };
+
+  // Duration
+  const config = readJsonSafe(join(teamDir, 'config.json'));
+  const startTime = config?.created_at ? new Date(config.created_at).getTime() : 0;
+  const lastCompleted = Math.max(...completed.map(t => t.completed_at ? new Date(t.completed_at).getTime() : 0));
+  const durationMin = startTime && lastCompleted ? Math.round((lastCompleted - startTime) / 60000) : null;
+
+  // Files created
+  const projectDirFile = join(teamDir, 'project_dir');
+  let filesCreated = [];
+  if (existsSync(projectDirFile)) {
+    const projectDir = readFileSync(projectDirFile, 'utf-8').trim();
+    // Gather from reports
+    const reportsDir = join(teamDir, 'reports');
+    if (existsSync(reportsDir)) {
+      try {
+        readdirSync(reportsDir).filter(f => f.endsWith('.json')).forEach(f => {
+          const report = readJsonSafe(join(reportsDir, f));
+          if (report?.files_created) filesCreated.push(...report.files_created);
+          if (report?.files_modified) filesCreated.push(...report.files_modified);
+        });
+      } catch {}
+    }
+    filesCreated = [...new Set(filesCreated)];
+  }
+
+  // PR URL — check git agent log
+  let prUrl = null;
+  const gitLog = join(teamDir, 'logs', 'git.log');
+  if (existsSync(gitLog)) {
+    try {
+      const logContent = readFileSync(gitLog, 'utf-8');
+      const prMatch = logContent.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+      if (prMatch) prUrl = prMatch[0];
+    } catch {}
+  }
+
+  // Agents used
+  const agentsDir = join(teamDir, 'agents');
+  let agentsUsed = 0;
+  if (existsSync(agentsDir)) {
+    try { agentsUsed = readdirSync(agentsDir).filter(f => f.endsWith('.sh')).length; } catch {}
+  }
+
+  return {
+    tasks_total: tasks.length,
+    tasks_completed: completed.length,
+    tasks_failed: tasks.filter(t => t.status === 'failed').length,
+    duration_min: durationMin,
+    files_created: filesCreated,
+    agents_used: agentsUsed,
+    pr_url: prUrl,
+  };
 }
 
 function getTeamReports(teamId) {
@@ -880,6 +946,13 @@ const server = createServer(async (req, res) => {
       return jsonResponse(res, { reports: getTeamReports(params.id) });
     }
 
+    // GET /api/teams/:id/summary
+    params = matchRoute(path, '/api/teams/:id/summary');
+    if (method === 'GET' && params) {
+      if (!isValidTeamId(params.id)) return errorResponse(res, 'Invalid team ID');
+      return jsonResponse(res, getTeamSummary(params.id));
+    }
+
     // GET /api/teams/:id/review
     params = matchRoute(path, '/api/teams/:id/review');
     if (method === 'GET' && params) {
@@ -1147,8 +1220,17 @@ Respond to the latest message. Be concise and helpful. Answer in the same langua
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  \x1b[1mhandle-it Web UI\x1b[0m`);
   console.log(`  http://localhost:${PORT}`);
+  // Show network IP for mobile access
+  const nets = networkInterfaces();
+  for (const iface of Object.values(nets)) {
+    for (const cfg of iface) {
+      if (cfg.family === 'IPv4' && !cfg.internal) {
+        console.log(`  http://${cfg.address}:${PORT}  \x1b[2m(network)\x1b[0m`);
+      }
+    }
+  }
   console.log(`  \x1b[2mCtrl+C to stop\x1b[0m\n`);
 });
