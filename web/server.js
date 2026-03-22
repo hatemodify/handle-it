@@ -754,12 +754,12 @@ function startPipeline(idea, projectDir, projectName) {
       if (!resolved) {
         resolved = true;
         clearInterval(pollInterval);
-        resolve({ pid: child.pid, team_id: null });
+        resolve({ pid: child.pid, team_id: null, output: output.slice(-2000) });
       }
     }, 30000);
 
     // If child exits before we find a team, stop polling
-    child.on('exit', () => {
+    child.on('exit', (code) => {
       if (!resolved) {
         // Give a final check
         setTimeout(() => {
@@ -769,9 +769,9 @@ function startPipeline(idea, projectDir, projectName) {
           if (existsSync(TEAMS_ROOT)) {
             const after = readdirSync(TEAMS_ROOT);
             const newTeam = after.find(d => !before.has(d));
-            resolve({ pid: child.pid, team_id: newTeam || null });
+            resolve({ pid: child.pid, team_id: newTeam || null, exit_code: code, output: output.slice(-2000) });
           } else {
-            resolve({ pid: child.pid, team_id: null });
+            resolve({ pid: child.pid, team_id: null, exit_code: code, output: output.slice(-2000) });
           }
         }, 500);
       }
