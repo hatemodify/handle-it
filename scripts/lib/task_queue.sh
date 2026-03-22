@@ -164,7 +164,7 @@ tq_claim() {
          (.depends_on | all(. as $dep | $completed | index($dep) != null))
        )
      | .id' \
-    "$queue_file" 2>/dev/null | head -1)
+    "$queue_file" 2>/dev/null | head -1) || true
 
   if [ -z "$task_id" ]; then
     _unlock "$lockfile"

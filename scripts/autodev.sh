@@ -622,13 +622,14 @@ main() {
   EXISTING_FILES=""
   if [ -d "$PROJECT_DIR" ]; then
     local file_count
-    file_count=$(find "$PROJECT_DIR" -type f \
+    # find|head can cause SIGPIPE (141) with pipefail; disable pipefail in subshell
+    file_count=$(set +o pipefail; find "$PROJECT_DIR" -type f \
       ! -path "*/node_modules/*" ! -path "*/.git/*" \
       ! -path "*/.next/*" ! -path "*/dist/*" \
       2>/dev/null | head -20 | wc -l | tr -d ' ')
     if [ "$file_count" -gt 0 ]; then
       MODIFY_MODE=true
-      EXISTING_FILES=$(find "$PROJECT_DIR" -type f \
+      EXISTING_FILES=$(set +o pipefail; find "$PROJECT_DIR" -type f \
         ! -path "*/node_modules/*" ! -path "*/.git/*" \
         ! -path "*/.next/*" ! -path "*/dist/*" \
         2>/dev/null | head -50 | sed "s|^$PROJECT_DIR/||" | sort)
