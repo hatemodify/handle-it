@@ -38,7 +38,9 @@ const app = (() => {
       headers: { 'Content-Type': 'application/json' },
       ...options,
     });
-    return res.json();
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
   }
 
   // ── Router ──

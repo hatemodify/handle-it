@@ -731,23 +731,51 @@ function startPipeline(idea, projectDir, projectName) {
     child.stdout.on('data', chunk => { output += chunk.toString(); });
     child.stderr.on('data', chunk => { output += chunk.toString(); });
 
-    // Try to detect team ID from teams root (new directory appears)
+    // Poll for new team directory (autodev.sh may take a while before team_create)
     const before = existsSync(TEAMS_ROOT) ? new Set(readdirSync(TEAMS_ROOT)) : new Set();
+    let resolved = false;
 
-    setTimeout(() => {
-      if (!existsSync(TEAMS_ROOT)) {
-        resolve({ pid: child.pid, team_id: null });
-        return;
-      }
+    const pollInterval = setInterval(() => {
+      if (resolved) return;
+      if (!existsSync(TEAMS_ROOT)) return;
       const after = readdirSync(TEAMS_ROOT);
       const newTeam = after.find(d => !before.has(d));
-      const teamId = newTeam || null;
-      if (teamId) {
-        runningPipelines.set(teamId, child);
-        child.on('exit', () => runningPipelines.delete(teamId));
+      if (newTeam) {
+        resolved = true;
+        clearInterval(pollInterval);
+        runningPipelines.set(newTeam, child);
+        child.on('exit', () => runningPipelines.delete(newTeam));
+        resolve({ pid: child.pid, team_id: newTeam });
       }
-      resolve({ pid: child.pid, team_id: teamId });
-    }, 3000);
+    }, 500);
+
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        clearInterval(pollInterval);
+        resolve({ pid: child.pid, team_id: null });
+      }
+    }, 30000);
+
+    // If child exits before we find a team, stop polling
+    child.on('exit', () => {
+      if (!resolved) {
+        // Give a final check
+        setTimeout(() => {
+          if (resolved) return;
+          resolved = true;
+          clearInterval(pollInterval);
+          if (existsSync(TEAMS_ROOT)) {
+            const after = readdirSync(TEAMS_ROOT);
+            const newTeam = after.find(d => !before.has(d));
+            resolve({ pid: child.pid, team_id: newTeam || null });
+          } else {
+            resolve({ pid: child.pid, team_id: null });
+          }
+        }, 500);
+      }
+    });
   });
 }
 
