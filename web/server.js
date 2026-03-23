@@ -697,13 +697,39 @@ function setupSSE(res, teamId) {
 // ── Pipeline actions ──
 const runningPipelines = new Map();
 
-function startPipeline(idea, projectDir, projectName) {
+function saveDocuments(documents) {
+  if (!documents || !Array.isArray(documents) || documents.length === 0) return null;
+  const docsDir = join(TEAMS_ROOT, `.docs_${Date.now()}`);
+  mkdirSync(docsDir, { recursive: true });
+  for (const doc of documents.slice(0, 10)) {
+    const safeName = (doc.name || 'document').replace(/[^a-zA-Z0-9가-힣._-]/g, '_').slice(0, 100);
+    if (doc.type === 'file' && doc.path) {
+      if (doc.path.includes('..')) continue;
+      try {
+        const content = readFileSync(doc.path, 'utf-8');
+        writeFileSync(join(docsDir, safeName), content.slice(0, 100000));
+      } catch {}
+    } else if (doc.type === 'text' && doc.content) {
+      const name = safeName.endsWith('.md') ? safeName : safeName + '.md';
+      writeFileSync(join(docsDir, name), doc.content.slice(0, 100000));
+    }
+  }
+  // Check if any files were actually saved
+  try {
+    if (readdirSync(docsDir).length === 0) { rmSync(docsDir, { recursive: true }); return null; }
+  } catch { return null; }
+  return docsDir;
+}
+
+function startPipeline(idea, projectDir, projectName, documents) {
   return new Promise((resolve, reject) => {
     const configPath = join(process.cwd(), 'handle-it.config.json');
     let config = {};
     if (existsSync(configPath)) {
       try { config = JSON.parse(readFileSync(configPath, 'utf-8')); } catch {}
     }
+
+    const docsDir = saveDocuments(documents);
 
     const env = {
       ...process.env,
@@ -719,6 +745,7 @@ function startPipeline(idea, projectDir, projectName) {
       AUTODEV_MODEL: config.model || process.env.AUTODEV_MODEL || '',
       AUTODEV_PROJECT_NAME: projectName || '',
       AUTODEV_AGENTS: (config.agents || []).join(','),
+      AUTODEV_DOCS_DIR: docsDir || '',
     };
 
     const args = [join(SCRIPTS_DIR, 'autodev.sh'), idea];
@@ -1175,7 +1202,7 @@ Respond to the latest message. Be concise and helpful. Answer in the same langua
       if (body.idea.length > 1000) {
         return errorResponse(res, 'idea too long (max 1000 chars)');
       }
-      const result = await startPipeline(body.idea.trim(), body.project_dir || null, body.project_name || null);
+      const result = await startPipeline(body.idea.trim(), body.project_dir || null, body.project_name || null, body.documents || null);
       return jsonResponse(res, result);
     }
 

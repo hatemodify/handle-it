@@ -32,6 +32,9 @@ const app = (() => {
   // Spec validation state
   let specValidation = { valid: true, error: null };
 
+  // Reference documents state: { new: [...], import: [...] }
+  let refDocs = { new: [], import: [] };
+
   // ── API ──
   async function api(path, options = {}) {
     const res = await fetch(`/api${path}`, {
@@ -1534,6 +1537,7 @@ const app = (() => {
     if (fb) fb.style.display = 'none';
     const selected = $('new-folder-picker-selected');
     if (selected) selected.innerHTML = '<span class="folder-picker-placeholder">Select output folder...</span>';
+    clearDocs('new');
   }
 
   // ── Folder Browser ──
@@ -1552,6 +1556,7 @@ const app = (() => {
     $('folder-browser').style.display = 'none';
     const selected = $('folder-picker-selected');
     if (selected) selected.innerHTML = '<span class="folder-picker-placeholder">Select a project folder...</span>';
+    clearDocs('import');
   }
 
   async function openFolderBrowser() {
@@ -1637,6 +1642,79 @@ const app = (() => {
     }
     $('folder-browser').style.display = 'none';
     showToast('Folder selected: ' + name);
+  }
+
+  // ── Reference Documents ──
+  function addDoc(prefix, type) {
+    if (refDocs[prefix].length >= 10) {
+      showToast('Maximum 10 documents', 'error');
+      return;
+    }
+    if (type === 'file') {
+      refDocs[prefix].push({ type: 'file', name: '', path: '' });
+    } else {
+      refDocs[prefix].push({ type: 'text', name: '', content: '' });
+    }
+    renderDocs(prefix);
+  }
+
+  function removeDoc(prefix, idx) {
+    refDocs[prefix].splice(idx, 1);
+    renderDocs(prefix);
+  }
+
+  function updateDoc(prefix, idx, field, value) {
+    if (refDocs[prefix][idx]) {
+      refDocs[prefix][idx][field] = value;
+    }
+  }
+
+  function renderDocs(prefix) {
+    const list = $(`${prefix}-docs-list`);
+    if (!list) return;
+    if (refDocs[prefix].length === 0) {
+      list.innerHTML = '';
+      return;
+    }
+    list.innerHTML = refDocs[prefix].map((doc, i) => {
+      if (doc.type === 'file') {
+        return `<div class="doc-item">
+          <div class="doc-item-row">
+            <span class="doc-icon" title="File">&#128196;</span>
+            <input class="form-input form-input-sm doc-path-input" placeholder="/path/to/document..."
+              value="${escapeHtml(doc.path)}"
+              onchange="app.updateDoc('${prefix}',${i},'path',this.value);app.updateDoc('${prefix}',${i},'name',this.value.split('/').pop())">
+            <button class="btn btn-sm doc-remove" onclick="app.removeDoc('${prefix}',${i})">&times;</button>
+          </div>
+        </div>`;
+      } else {
+        return `<div class="doc-item">
+          <div class="doc-item-row">
+            <span class="doc-icon" title="Text">&#128221;</span>
+            <input class="form-input form-input-sm" placeholder="Document name..."
+              value="${escapeHtml(doc.name)}"
+              onchange="app.updateDoc('${prefix}',${i},'name',this.value)">
+            <button class="btn btn-sm doc-remove" onclick="app.removeDoc('${prefix}',${i})">&times;</button>
+          </div>
+          <textarea class="form-textarea doc-textarea" rows="3" placeholder="Paste document content..."
+            onchange="app.updateDoc('${prefix}',${i},'content',this.value)">${escapeHtml(doc.content)}</textarea>
+        </div>`;
+      }
+    }).join('');
+  }
+
+  function getDocsPayload(prefix) {
+    return refDocs[prefix]
+      .filter(d => d.type === 'file' ? d.path.trim() : d.content.trim())
+      .map(d => d.type === 'file'
+        ? { type: 'file', name: d.name || d.path.split('/').pop(), path: d.path.trim() }
+        : { type: 'text', name: d.name || 'document', content: d.content.trim() }
+      );
+  }
+
+  function clearDocs(prefix) {
+    refDocs[prefix] = [];
+    renderDocs(prefix);
   }
 
   // ── New Pipeline Folder Browser ──
@@ -1741,7 +1819,7 @@ const app = (() => {
     try {
       const result = await api('/pipeline/start', {
         method: 'POST',
-        body: JSON.stringify({ idea, project_name: projectName, project_dir: projectDir }),
+        body: JSON.stringify({ idea, project_name: projectName, project_dir: projectDir, documents: getDocsPayload('new') }),
       });
 
       hideNewPipelineModal();
@@ -1802,7 +1880,7 @@ const app = (() => {
     try {
       const result = await api('/pipeline/start', {
         method: 'POST',
-        body: JSON.stringify({ idea: prompt, project_name: projectName, project_dir: projectDir }),
+        body: JSON.stringify({ idea: prompt, project_name: projectName, project_dir: projectDir, documents: getDocsPayload('import') }),
       });
 
       hideImportModal();
@@ -1964,6 +2042,9 @@ const app = (() => {
     selectFolder,
     openNewFolderBrowser,
     newFolderBrowserUp,
+    addDoc,
+    removeDoc,
+    updateDoc,
     startPipeline,
     startImport,
     sendPrompt,

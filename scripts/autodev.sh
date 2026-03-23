@@ -181,9 +181,39 @@ $TIMESTAMP
 EOF
   fi
 
+  # 참고 문서 처리
+  if [ -n "${AUTODEV_DOCS_DIR:-}" ] && [ -d "$AUTODEV_DOCS_DIR" ]; then
+    local docs_count
+    docs_count=$(find "$AUTODEV_DOCS_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$docs_count" -gt 0 ]; then
+      {
+        echo ""
+        echo "## 참고 문서"
+        echo "아래 문서를 반드시 참고하여 작업하세요."
+        echo ""
+        for doc in "$AUTODEV_DOCS_DIR"/*; do
+          [ -f "$doc" ] || continue
+          local doc_name
+          doc_name=$(basename "$doc")
+          echo "### $doc_name"
+          echo '```'
+          head -300 "$doc"
+          echo '```'
+          echo ""
+        done
+      } >> "$HOME/.handle-it/CLAUDE.md"
+      log_info "참고 문서 ${docs_count}개 로드 완료"
+    fi
+  fi
+
   # 팀 생성
   TEAM_DIR=$(team_create "$TEAM_NAME")
   echo "$PROJECT_DIR" > "$TEAMS_ROOT/$TEAM_NAME/project_dir"
+
+  # 참고 문서를 팀 디렉토리로 이동
+  if [ -n "${AUTODEV_DOCS_DIR:-}" ] && [ -d "$AUTODEV_DOCS_DIR" ]; then
+    mv "$AUTODEV_DOCS_DIR" "$TEAMS_ROOT/$TEAM_NAME/docs" 2>/dev/null || true
+  fi
 
   log_success "초기화 완료"
   echo "$TEAM_DIR"

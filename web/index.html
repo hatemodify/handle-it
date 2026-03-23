@@ -87,6 +87,14 @@
             <div class="folder-browser-footer" id="new-folder-browser-footer"></div>
           </div>
         </div>
+        <div class="form-group">
+          <label class="form-label">Reference Documents (optional)</label>
+          <div id="new-docs-list" class="docs-list"></div>
+          <div class="docs-actions">
+            <button class="btn btn-sm" onclick="app.addDoc('new','file')">+ File</button>
+            <button class="btn btn-sm" onclick="app.addDoc('new','text')">+ Text</button>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="app.hideNewPipelineModal()">Cancel</button>
@@ -128,6 +136,14 @@
         <div class="form-group">
           <label class="form-label" for="input-import-prompt">What do you want to change?</label>
           <textarea class="form-textarea" id="input-import-prompt" rows="4" placeholder="Add dark mode support&#10;Refactor authentication to use JWT&#10;Add Korean language i18n..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Reference Documents (optional)</label>
+          <div id="import-docs-list" class="docs-list"></div>
+          <div class="docs-actions">
+            <button class="btn btn-sm" onclick="app.addDoc('import','file')">+ File</button>
+            <button class="btn btn-sm" onclick="app.addDoc('import','text')">+ Text</button>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
